@@ -1,38 +1,14 @@
 package xyz.bczl.xlog
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin
-import io.flutter.plugin.common.MethodCall
-import io.flutter.plugin.common.MethodChannel
-import io.flutter.plugin.common.MethodChannel.MethodCallHandler
-import io.flutter.plugin.common.MethodChannel.Result
 
-/** XlogPlugin */
-class XlogPlugin :
-    FlutterPlugin,
-    MethodCallHandler {
-    // The MethodChannel that will the communication between Flutter and native Android
-    //
-    // This local reference serves to register the plugin with the Flutter Engine and unregister it
-    // when the Flutter Engine is detached from the Activity
-    private lateinit var channel: MethodChannel
-
-    override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
-        channel = MethodChannel(flutterPluginBinding.binaryMessenger, "xlog")
-        channel.setMethodCallHandler(this)
-    }
-
-    override fun onMethodCall(
-        call: MethodCall,
-        result: Result
-    ) {
-        if (call.method == "getPlatformVersion") {
-            result.success("Android ${android.os.Build.VERSION.RELEASE}")
-        } else {
-            result.notImplemented()
-        }
+/** XlogPlugin registers the pigeon-generated xlog configuration API. */
+class XlogPlugin : FlutterPlugin {
+    override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        XlogConfigApi.setUp(binding.binaryMessenger, XlogConfigApiImpl())
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-        channel.setMethodCallHandler(null)
+        XlogConfigApi.setUp(binding.binaryMessenger, null)
     }
 }

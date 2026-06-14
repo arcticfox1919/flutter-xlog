@@ -1,8 +1,5 @@
-
-import 'xlog_platform_interface.dart';
-
-class Xlog {
-  Future<String?> getPlatformVersion() {
-    return XlogPlatform.instance.getPlatformVersion();
-  }
-}
+export 'src/xlog_config_api.dart'
+    show XLogCompressMode, XLogInstanceHandle, XLogManager, XLogMode;
+export 'src/xlog_upload_planner.dart'
+    show XLogUploadPlanner, XLogUploadResult, XLogUploadStore, XLogUploader;
+export 'src/xlogger.dart' show XLogger, XLogLevel;

@@ -1,29 +1,9 @@
 group = "xyz.bczl.xlog"
 version = "1.0-SNAPSHOT"
 
-buildscript {
-    val kotlinVersion = "2.0.21"
-    repositories {
-        google()
-        mavenCentral()
-    }
-
-    dependencies {
-        classpath("com.android.tools.build:gradle:8.7.3")
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion")
-    }
-}
-
-allprojects {
-    repositories {
-        google()
-        mavenCentral()
-    }
-}
-
 plugins {
     id("com.android.library")
-    id("kotlin-android")
+    id("org.jetbrains.kotlin.android")
 }
 
 android {
@@ -55,5 +35,5 @@ android {
 }
 
 dependencies {
-
+    implementation("com.github.arcticfox1919:xlog:1.3.4")
 }
