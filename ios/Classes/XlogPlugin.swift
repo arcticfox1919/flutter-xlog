@@ -2,18 +2,13 @@ import Flutter
 import UIKit
 
 public class XlogPlugin: NSObject, FlutterPlugin {
-  public static func register(with registrar: FlutterPluginRegistrar) {
-    let channel = FlutterMethodChannel(name: "xlog", binaryMessenger: registrar.messenger())
-    let instance = XlogPlugin()
-    registrar.addMethodCallDelegate(instance, channel: channel)
-  }
+  /// Retained so the API stays alive for the lifetime of the plugin.
+  private var configApi: XlogConfigApiImpl?
 
-  public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-    switch call.method {
-    case "getPlatformVersion":
-      result("iOS " + UIDevice.current.systemVersion)
-    default:
-      result(FlutterMethodNotImplemented)
-    }
+  public static func register(with registrar: FlutterPluginRegistrar) {
+    let instance = XlogPlugin()
+    let api = XlogConfigApiImpl()
+    instance.configApi = api
+    XlogConfigApiSetup.setUp(binaryMessenger: registrar.messenger(), api: api)
   }
 }

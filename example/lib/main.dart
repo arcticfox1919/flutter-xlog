@@ -1,7 +1,4 @@
 import 'package:flutter/material.dart';
-import 'dart:async';
-
-import 'package:flutter/services.dart';
 import 'package:xlog/xlog.dart';
 
 void main() {
@@ -16,43 +13,74 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  String _platformVersion = 'Unknown';
-  final _xlogPlugin = Xlog();
+  static const _tag = 'XLogExample';
+
+  XLogLevel _level = XLogLevel.verbose;
 
   @override
   void initState() {
     super.initState();
-    initPlatformState();
+    // Note: the log file must be opened by the platform side (e.g. Kotlin
+    // XLog.init on Android) before these writes are persisted to disk.
+    _level = XLogger.level;
+    XLogger.i(_tag, 'example app started');
   }
 
-  // Platform messages are asynchronous, so we initialize in an async method.
-  Future<void> initPlatformState() async {
-    String platformVersion;
-    // Platform messages may fail, so we use a try/catch PlatformException.
-    // We also handle the message potentially returning null.
-    try {
-      platformVersion =
-          await _xlogPlugin.getPlatformVersion() ?? 'Unknown platform version';
-    } on PlatformException {
-      platformVersion = 'Failed to get platform version.';
-    }
-
-    // If the widget was removed from the tree while the asynchronous platform
-    // message was in flight, we want to discard the reply rather than calling
-    // setState to update our non-existent appearance.
-    if (!mounted) return;
-
-    setState(() {
-      _platformVersion = platformVersion;
-    });
+  void _write(XLogLevel level, void Function(String, String) fn) {
+    fn(_tag, 'sample ${level.name} log at ${DateTime.now().millisecondsSinceEpoch}');
   }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       home: Scaffold(
-        appBar: AppBar(title: const Text('Plugin example app')),
-        body: Center(child: Text('Running on: $_platformVersion\n')),
+        appBar: AppBar(title: const Text('xlog example')),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text('Current level: ${_level.name}'),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 8,
+                children: [
+                  ElevatedButton(
+                    onPressed: () => _write(XLogLevel.verbose, XLogger.v),
+                    child: const Text('verbose'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => _write(XLogLevel.debug, XLogger.d),
+                    child: const Text('debug'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => _write(XLogLevel.info, XLogger.i),
+                    child: const Text('info'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => _write(XLogLevel.warn, XLogger.w),
+                    child: const Text('warn'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => _write(XLogLevel.error, XLogger.e),
+                    child: const Text('error'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () {
+                  setState(() {
+                    _level = _level == XLogLevel.verbose
+                        ? XLogLevel.warn
+                        : XLogLevel.verbose;
+                    XLogger.level = _level;
+                  });
+                },
+                child: const Text('toggle level'),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
