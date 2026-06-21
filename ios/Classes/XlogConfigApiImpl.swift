@@ -1,82 +1,112 @@
 import Foundation
 
-/// Placeholder implementation of the pigeon-generated `XlogConfigApi` for iOS.
-///
-/// mars/xlog is not yet integrated on iOS (no XCFramework, no Swift wrapper),
-/// so every call throws to make the missing integration explicit rather than
-/// silently pretending the log was configured.
-///
-/// Once mars/xlog is integrated, replace the bodies here with real calls.
-/// Note: log writing is handled through Dart FFI, not this API.
+/// Bridges Flutter configuration calls to the same facade available to native code.
 class XlogConfigApiImpl: XlogConfigApi {
-
-  private static let notImplemented = FlutterError(
-    code: "unimplemented",
-    message: "xlog is not yet integrated on iOS",
-    details: nil
-  )
-
   func initialize(config: XlogConfig) throws {
-    throw XlogConfigApiImpl.notImplemented
+    let configuration = XLogConfiguration(
+      logDirectory: config.logDir,
+      namePrefix: config.namePrefix
+    )
+    configuration.cacheDirectory = config.cacheDir.isEmpty ? nil : config.cacheDir
+    configuration.publicKey = config.pubKey.isEmpty ? nil : config.pubKey
+    configuration.cacheDays = Int(config.cacheDays)
+    configuration.level = config.level.logLevel
+    configuration.mode = config.mode.xlogMode
+    configuration.compressMode = config.compressMode.xlogCompressMode
+    configuration.compressLevel = Int(config.compressLevel)
+    configuration.consoleLogEnabled = config.consoleLogEnabled
+
+    guard XLog.initialize(configuration: configuration) else {
+      throw PigeonError(
+        code: "initialize_failed",
+        message: "mars-xlog failed to open the global appender",
+        details: nil
+      )
+    }
   }
 
   func flush(sync: Bool) throws {
-    throw XlogConfigApiImpl.notImplemented
+    sync ? XLog.flushSync() : XLog.flush()
   }
 
   func close() throws {
-    throw XlogConfigApiImpl.notImplemented
+    XLog.close()
   }
 
   func setLevel(level: XlogLevel) throws {
-    throw XlogConfigApiImpl.notImplemented
+    XLog.level = level.logLevel
   }
 
   func getLevel() throws -> XlogLevel {
-    throw XlogConfigApiImpl.notImplemented
+    XLog.level.pigeonLevel
   }
 
   func setConsoleLogEnabled(enabled: Bool) throws {
-    throw XlogConfigApiImpl.notImplemented
+    XLog.setConsoleLogEnabled(enabled)
   }
 
   func setAppenderMode(mode: XlogMode) throws {
-    throw XlogConfigApiImpl.notImplemented
+    XLog.setAppenderMode(mode.xlogMode)
   }
 
   func setMaxFileSize(maxBytes: Int64) throws {
-    throw XlogConfigApiImpl.notImplemented
+    XLog.setMaxFileSize(maxBytes)
   }
 
   func setMaxAliveSeconds(seconds: Int64) throws {
-    throw XlogConfigApiImpl.notImplemented
+    XLog.setMaxAliveTime(TimeInterval(seconds))
   }
 
   func instancePrefixes() throws -> [String] {
-    throw XlogConfigApiImpl.notImplemented
+    XLog.instanceNamePrefixes
   }
 
   func hasInstance(prefix: String) throws -> Bool {
-    throw XlogConfigApiImpl.notImplemented
+    XLog.instance(namePrefix: prefix) != nil
   }
 
   func flushInstance(prefix: String, sync: Bool) throws {
-    throw XlogConfigApiImpl.notImplemented
+    guard let instance = XLog.instance(namePrefix: prefix) else { return }
+    sync ? instance.flushSync() : instance.flush()
   }
 
   func getInstanceLevel(prefix: String) throws -> XlogLevel {
-    throw XlogConfigApiImpl.notImplemented
+    (XLog.instance(namePrefix: prefix)?.level ?? .none).pigeonLevel
   }
 
   func setInstanceConsoleLogEnabled(prefix: String, enabled: Bool) throws {
-    throw XlogConfigApiImpl.notImplemented
+    XLog.instance(namePrefix: prefix)?.setConsoleLogEnabled(enabled)
   }
 
   func closeInstance(prefix: String) throws {
-    throw XlogConfigApiImpl.notImplemented
+    XLog.closeInstance(namePrefix: prefix)
   }
 
   func getInstanceLogFiles(prefix: String, timespanDays: Int64) throws -> [String] {
-    throw XlogConfigApiImpl.notImplemented
+    XLog.instance(namePrefix: prefix)?.logFiles(timeSpanDays: Int(timespanDays)) ?? []
+  }
+}
+
+private extension XlogLevel {
+  var logLevel: LogLevel {
+    LogLevel(rawValue: rawValue) ?? .none
+  }
+}
+
+private extension LogLevel {
+  var pigeonLevel: XlogLevel {
+    XlogLevel(rawValue: rawValue) ?? .none
+  }
+}
+
+private extension XlogMode {
+  var xlogMode: XLogMode {
+    XLogMode(rawValue: rawValue) ?? .async
+  }
+}
+
+private extension XlogCompressMode {
+  var xlogCompressMode: XLogCompressMode {
+    XLogCompressMode(rawValue: rawValue) ?? .zlib
   }
 }

@@ -1,3 +1,5 @@
-## 0.0.1
+## 0.1.0
 
 * Initialize the Flutter xlog plugin repository.
+* Add Android and iOS native xlog integration with Flutter FFI logging.
+* Add native configuration and multi-instance management APIs.

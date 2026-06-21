@@ -10,6 +10,8 @@ It is intended to expose the native C++ xlog logging library to Flutter through 
 - `dart:ffi` access to the C++ logging library.
 - Android 16 KB page size support.
 - Android AAR integration for `mars-xlog`.
+- iOS XCFramework integration for `mars-xlog`.
+- Native Kotlin and Swift facades for hybrid applications.
 - Designed for low-overhead logging in Flutter apps.
 - Compatible with Dart `>=3.3.0 <4.0.0` and Flutter `>=3.0.0`.
 
@@ -27,12 +29,33 @@ The `x86_64` ABI is included for Android emulators.
 
 ## iOS
 
-The iOS side is intended to consume the `mars-xlog` XCFramework built from the native xlog project.
+The iOS plugin depends on the `mars-xlog` CocoaPod and exposes a public Swift/
+Objective-C facade. A host application using the Flutter CocoaPods integration
+does not need to declare `mars-xlog` again.
 
 Expected XCFramework slices:
 
 - `iphoneos` arm64
 - `iphonesimulator` arm64
+
+Hybrid applications can initialize xlog before starting Flutter:
+
+```swift
+import xlog
+
+let configuration = XLogConfiguration(
+  logDirectory: logDirectory,
+  namePrefix: "app"
+)
+configuration.cacheDirectory = cacheDirectory
+configuration.level = .debug
+
+XLog.initialize(configuration: configuration)
+XLog.info("AppDelegate", message: "xlog initialized")
+```
+
+Flutter's `XLogManager` uses this same native facade, so native and Dart code
+share the global appender and log instances.
 
 
 ## Development
