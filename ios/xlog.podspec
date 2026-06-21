@@ -4,7 +4,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'xlog'
-  s.version          = '0.1.0'
+  s.version          = '0.1.1'
   s.summary          = 'A new Flutter project.'
   s.description      = <<-DESC
 A new Flutter project.
@@ -21,7 +21,7 @@ A new Flutter project.
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386' }
   s.swift_version = '5.0'
   s.static_framework = true
-  s.dependency 'mars-xlog', '1.3.4'
+  s.dependency 'mars-xlog', '1.3.5'
 
   # If your plugin requires a privacy manifest, for example if it uses any
   # required reason APIs, update the PrivacyInfo.xcprivacy file to describe your
