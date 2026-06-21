@@ -35,5 +35,5 @@ android {
 }
 
 dependencies {
-    implementation("com.github.arcticfox1919:xlog:1.3.4")
+    implementation("com.github.arcticfox1919:xlog:1.3.5")
 }
