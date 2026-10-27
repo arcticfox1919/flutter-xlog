@@ -3,19 +3,28 @@ import 'dart:io' show Platform;
 
 import 'generated/xlog_bindings.dart';
 
-/// Loads the native xlog library and exposes a shared [XLogBindings].
+/// Retains the native xlog library, FFI bindings and writer finalizer together.
 ///
 /// The native library is opened and initialized (appender) by the platform
 /// side (Kotlin on Android, the linked framework on iOS). Here we only need a
 /// handle to the symbols already loaded into the process so Dart can write
 /// logs through FFI.
-class XLogNative {
-  XLogNative._();
+final class XLogNative {
+  XLogNative(this.library)
+      : bindings = XLogBindings(library),
+        finalizer = ffi.NativeFinalizer(
+          library.lookup<
+                  ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
+              'xlogger_writer_release'),
+        );
 
-  static XLogBindings? _bindings;
+  /// Requires the per-entry tag writer API from native 1.3.7.
+  /// Resolve once and retain the library, bindings and finalizer together.
+  static final XLogNative instance = XLogNative(_open());
 
-  /// The shared bindings instance, lazily resolved on first use.
-  static XLogBindings get bindings => _bindings ??= XLogBindings(_open());
+  final ffi.DynamicLibrary library;
+  final XLogBindings bindings;
+  final ffi.NativeFinalizer finalizer;
 
   static ffi.DynamicLibrary _open() {
     // On Android the logging symbols live in libmarsxlog.so.

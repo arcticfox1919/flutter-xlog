@@ -201,43 +201,10 @@ class XLogBindings {
       void Function(ffi.Pointer<XLoggerInfo_t>, ffi.Pointer<ffi.Char>,
           ffi.Pointer<ffi.Char>)>();
 
-  void xlogger_VPrint(
-    ffi.Pointer<XLoggerInfo_t> _info,
-    ffi.Pointer<ffi.Char> _format,
-    ffi.Pointer<ffi.Char> _list,
-  ) {
-    return _xlogger_VPrint(
-      _info,
-      _format,
-      _list,
-    );
-  }
-
-  late final _xlogger_VPrintPtr = _lookup<
-      ffi.NativeFunction<
-          ffi.Void Function(ffi.Pointer<XLoggerInfo_t>, ffi.Pointer<ffi.Char>,
-              ffi.Pointer<ffi.Char>)>>('xlogger_VPrint');
-  late final _xlogger_VPrint = _xlogger_VPrintPtr.asFunction<
-      void Function(ffi.Pointer<XLoggerInfo_t>, ffi.Pointer<ffi.Char>,
-          ffi.Pointer<ffi.Char>)>();
-
-  void xlogger_Print(
-    ffi.Pointer<XLoggerInfo_t> _info,
-    ffi.Pointer<ffi.Char> _format,
-  ) {
-    return _xlogger_Print(
-      _info,
-      _format,
-    );
-  }
-
-  late final _xlogger_PrintPtr = _lookup<
-      ffi.NativeFunction<
-          ffi.Void Function(ffi.Pointer<XLoggerInfo_t>,
-              ffi.Pointer<ffi.Char>)>>('xlogger_Print');
-  late final _xlogger_Print = _xlogger_PrintPtr.asFunction<
-      void Function(ffi.Pointer<XLoggerInfo_t>, ffi.Pointer<ffi.Char>)>();
-
+  /// Writes preformatted text to the global appender without printf processing.
+  /// Metadata storage is supplied by the caller; this entry point does not
+  /// allocate XLoggerInfo. A caller reusing storage must update per-entry fields
+  /// and keep it intact throughout the call, including any reentrant log hooks.
   void xlogger_Write(
     ffi.Pointer<XLoggerInfo_t> _info,
     ffi.Pointer<ffi.Char> _log,
@@ -254,6 +221,105 @@ class XLogBindings {
               ffi.Pointer<ffi.Char>)>>('xlogger_Write');
   late final _xlogger_Write = _xlogger_WritePtr.asFunction<
       void Function(ffi.Pointer<XLoggerInfo_t>, ffi.Pointer<ffi.Char>)>();
+
+  /// NULL prefix explicitly selects the global appender. Missing/empty named
+  /// prefixes return NULL and never fall back to the global appender.
+  ffi.Pointer<XLoggerWriter> xlogger_writer_bind_existing(
+    ffi.Pointer<ffi.Char> prefix,
+  ) {
+    return _xlogger_writer_bind_existing(
+      prefix,
+    );
+  }
+
+  late final _xlogger_writer_bind_existingPtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Pointer<XLoggerWriter> Function(
+              ffi.Pointer<ffi.Char>)>>('xlogger_writer_bind_existing');
+  late final _xlogger_writer_bind_existing = _xlogger_writer_bind_existingPtr
+      .asFunction<ffi.Pointer<XLoggerWriter> Function(ffi.Pointer<ffi.Char>)>();
+
+  /// Synchronously consumes tag and message as NUL-terminated UTF-8 strings. Both
+  /// buffers must remain valid until the call returns, including reentrant hooks.
+  /// They are borrowed for this call only; changing tag does not bind a new writer.
+  /// The adapter performs no instance lookup,
+  /// locking, refcounting or heap allocation per write. Metadata and fixed fields
+  /// are cached at binding; tag, level, timestamp and current thread ID vary per entry.
+  /// A synchronous reentrant write uses separate stack metadata.
+  /// The xlog backend itself may allocate, lock or block.
+  int xlogger_writer_write(
+    ffi.Pointer<XLoggerWriter> writer,
+    int level,
+    ffi.Pointer<ffi.Char> tag,
+    ffi.Pointer<ffi.Char> message,
+  ) {
+    return _xlogger_writer_write(
+      writer,
+      level,
+      tag,
+      message,
+    );
+  }
+
+  late final _xlogger_writer_writePtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Int32 Function(
+              ffi.Pointer<XLoggerWriter>,
+              ffi.Int32,
+              ffi.Pointer<ffi.Char>,
+              ffi.Pointer<ffi.Char>)>>('xlogger_writer_write');
+  late final _xlogger_writer_write = _xlogger_writer_writePtr.asFunction<
+      int Function(ffi.Pointer<XLoggerWriter>, int, ffi.Pointer<ffi.Char>,
+          ffi.Pointer<ffi.Char>)>();
+
+  /// Queries the current severity threshold of the appender bound to writer.
+  /// Uses the bound pointer directly, without an instance-name lookup, message
+  /// encoding, heap allocation, or a log write. An optional early check can avoid
+  /// expensive message construction; ordinary callers can just call write(),
+  /// which performs its own level check within the same write call.
+  ///
+  /// @param writer A live binding returned by bind_existing(). A NULL binding
+  /// returns 0. A released binding must never be passed here.
+  /// @param level  A TLogLevel from kLevelVerbose through kLevelFatal, inclusive.
+  /// @return 1 if that severity is currently enabled, otherwise 0. Invalid levels
+  /// (including kLevelNone) also return 0. This checks severity only;
+  /// downstream xlog filters may still reject the entry. The result is a
+  /// snapshot, not a reservation: a later write checks the level again.
+  int xlogger_writer_is_enabled(
+    ffi.Pointer<XLoggerWriter> writer,
+    int level,
+  ) {
+    return _xlogger_writer_is_enabled(
+      writer,
+      level,
+    );
+  }
+
+  late final _xlogger_writer_is_enabledPtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Int32 Function(ffi.Pointer<XLoggerWriter>,
+              ffi.Int32)>>('xlogger_writer_is_enabled');
+  late final _xlogger_writer_is_enabled = _xlogger_writer_is_enabledPtr
+      .asFunction<int Function(ffi.Pointer<XLoggerWriter>, int)>();
+
+  /// Destroys only the binding allocated by bind_existing().
+  /// NULL is allowed. Every non-NULL binding must be released exactly once through
+  /// this function, never through free() or a caller's delete. The pointer becomes
+  /// invalid on return; a second release or any later access is undefined behavior.
+  /// This does not flush, close or delete the bound native log instance.
+  void xlogger_writer_release(
+    ffi.Pointer<XLoggerWriter> writer,
+  ) {
+    return _xlogger_writer_release(
+      writer,
+    );
+  }
+
+  late final _xlogger_writer_releasePtr = _lookup<
+          ffi.NativeFunction<ffi.Void Function(ffi.Pointer<XLoggerWriter>)>>(
+      'xlogger_writer_release');
+  late final _xlogger_writer_release = _xlogger_writer_releasePtr
+      .asFunction<void Function(ffi.Pointer<XLoggerWriter>)>();
 }
 
 enum TLogLevel {
@@ -351,3 +417,5 @@ typedef xlogger_filter_tFunction = ffi.Int Function(
     ffi.Pointer<XLoggerInfo_t> _info, ffi.Pointer<ffi.Char> _log);
 typedef Dartxlogger_filter_tFunction = int Function(
     ffi.Pointer<XLoggerInfo_t> _info, ffi.Pointer<ffi.Char> _log);
+
+final class XLoggerWriter extends ffi.Opaque {}

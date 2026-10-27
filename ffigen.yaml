@@ -18,9 +18,14 @@ headers:
 functions:
   include:
     - 'xlogger_.*'
+  # Dart sends preformatted messages through Write, without printf/va_list.
+  exclude:
+    - 'xlogger_Print'
+    - 'xlogger_VPrint'
 structs:
   include:
     - 'XLoggerInfo.*'
+    - 'XLoggerWriter'
 enums:
   include:
     - 'TLogLevel'

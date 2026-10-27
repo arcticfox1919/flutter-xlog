@@ -1,69 +1,58 @@
-import 'dart:ffi' as ffi;
-
-import 'package:ffi/ffi.dart';
-
-import 'generated/xlog_bindings.dart';
+import 'log_writer.dart';
+import 'xlog_level.dart';
 import 'xlog_native.dart';
 
-/// Log severity levels, mirroring the native [TLogLevel].
-enum XLogLevel {
-  verbose(TLogLevel.kLevelVerbose),
-  debug(TLogLevel.kLevelDebug),
-  info(TLogLevel.kLevelInfo),
-  warn(TLogLevel.kLevelWarn),
-  error(TLogLevel.kLevelError),
-  fatal(TLogLevel.kLevelFatal),
-  none(TLogLevel.kLevelNone);
+export 'log_writer.dart' show XLogWriter;
+export 'xlog_level.dart' show XLogLevel;
 
-  const XLogLevel(this.native);
-
-  /// The corresponding native enum value.
-  final TLogLevel native;
-
-  static XLogLevel fromNative(TLogLevel level) {
-    return switch (level) {
-      TLogLevel.kLevelAll => XLogLevel.verbose,
-      TLogLevel.kLevelDebug => XLogLevel.debug,
-      TLogLevel.kLevelInfo => XLogLevel.info,
-      TLogLevel.kLevelWarn => XLogLevel.warn,
-      TLogLevel.kLevelError => XLogLevel.error,
-      TLogLevel.kLevelFatal => XLogLevel.fatal,
-      TLogLevel.kLevelNone => XLogLevel.none,
-    };
-  }
-}
-
-/// Dart wrapper over the native xlog logging API.
-///
-/// Hides FFI pointers, struct layout and memory management; callers pass an
-/// already-composed log string.
-///
-/// The log file lifecycle (open / flush / close) is owned by the platform
-/// side (Kotlin on Android, the framework linked into the host on iOS). This
-/// class only writes log entries and reads/writes the log level.
-///
-/// Usage:
-/// ```dart
-/// XLogger.i('MainPage', 'app started');
-/// XLogger.e('Network', 'request failed: $error');
-/// ```
+/// Writes to the default native log instance, or binds a named native instance.
+/// Writers select the destination; tags are supplied separately for each entry.
 class XLogger {
   XLogger._();
-
-  static XLogBindings get _b => XLogNative.bindings;
+  static XLogWriter? _defaultWriter;
 
   // ---------------------------------------------------------------------------
   // Level
   // ---------------------------------------------------------------------------
 
   /// The current minimum level; entries below it are dropped by the native layer.
-  static XLogLevel get level => XLogLevel.fromNative(_b.xlogger_Level());
+  static XLogLevel get level =>
+      XLogLevel.fromNative(XLogNative.instance.bindings.xlogger_Level());
 
-  static set level(XLogLevel value) => _b.xlogger_SetLevel(value.native);
+  static set level(XLogLevel value) =>
+      XLogNative.instance.bindings.xlogger_SetLevel(value.native);
 
   /// Whether a log at [level] would currently be emitted.
   static bool isEnabledFor(XLogLevel level) =>
-      _b.xlogger_IsEnabledFor(level.native) != 0;
+      level != XLogLevel.none &&
+      XLogNative.instance.bindings.xlogger_IsEnabledFor(level.native) != 0;
+
+  // ---------------------------------------------------------------------------
+  // Writers
+  // ---------------------------------------------------------------------------
+
+  /// Binds an existing native instance. No appender is created. Native owners
+  /// must keep it open while using this writer; missing instances throw.
+  /// Requires a native binary exposing writer C API from xloggerbase.h.
+  /// [prefix] and entry tags must not contain NUL (U+0000). This precondition
+  /// is not checked; native C strings end at the first NUL character.
+  static XLogWriter attach(String prefix) {
+    return NativeLogWriter(XLogNative.instance, prefix: prefix);
+  }
+
+  /// Shared process-lifetime writing handle for the default native instance.
+  /// All static log methods reuse this handle, regardless of tag. It owns no
+  /// native appender. Use [releaseDefaultWriter] for an explicit binding reset.
+  static XLogWriter get defaultWriter =>
+      _defaultWriter ??= NativeLogWriter(XLogNative.instance);
+
+  /// Releases only the default writing handle; it does not close or flush the
+  /// appender. Stop its producers first. Retained references become disposed;
+  /// the next [defaultWriter] access binds a fresh handle.
+  static void releaseDefaultWriter() {
+    _defaultWriter?.dispose();
+    _defaultWriter = null;
+  }
 
   // ---------------------------------------------------------------------------
   // Writing
@@ -87,39 +76,13 @@ class XLogger {
   static void f(String tag, String message) =>
       log(XLogLevel.fatal, tag, message);
 
-  /// Writes a single log entry at [level]. [message] is composed by the caller.
-  ///
-  /// Logging must never break the calling code, so any failure while
-  /// marshalling or writing is swallowed. The [using] arena still releases its
-  /// native memory either way.
+  /// Reuses one default writer and submits through one FFI call. Explicit
+  /// [isEnabledFor] can skip expensive message construction/encoding when needed.
+  /// Logging failures never escape; binding failures are explicit when accessing
+  /// [defaultWriter] or calling [attach].
   static void log(XLogLevel level, String tag, String message) {
-    // Skip all marshalling when the level is filtered out.
-    if (_b.xlogger_IsEnabledFor(level.native) == 0) return;
-
     try {
-      using((arena) {
-        final info = arena<XLoggerInfo_t>();
-        final ref = info.ref;
-        ref.levelAsInt = level.native.value;
-        ref.tag = tag.toNativeUtf8(allocator: arena).cast<ffi.Char>();
-
-        // Fill the timestamp so the formatter can render it; otherwise the time
-        // field is left empty (the native side only formats it when tv_sec != 0).
-        final us = DateTime.now().microsecondsSinceEpoch;
-        ref.timeval1.tv_sec = us ~/ 1000000;
-        ref.timeval1.tv_usec = us % 1000000;
-
-        // -1 is a sentinel: xlogger_Write fills pid/tid/maintid via
-        // xlogger_pid()/tid()/maintid() only when the field equals -1
-        ref.pid = -1;
-        ref.tid = -1;
-        ref.maintid = -1;
-
-        final log = message.toNativeUtf8(allocator: arena).cast<ffi.Char>();
-        _b.xlogger_Write(info, log);
-      });
-    } catch (_) {
-      // Intentionally ignored: a logging failure should not propagate.
-    }
+      defaultWriter.write(level, tag, message);
+    } catch (_) {/* A log statement must not break the calling application. */}
   }
 }

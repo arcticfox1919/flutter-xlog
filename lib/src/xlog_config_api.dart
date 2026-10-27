@@ -1,5 +1,5 @@
 import 'generated/xlog_config.g.dart' as pigeon;
-import 'xlogger.dart' show XLogLevel;
+import 'xlogger.dart' show XLogLevel, XLogger, XLogWriter;
 
 /// Appender write mode.
 enum XLogMode {
@@ -41,7 +41,10 @@ class XLogManager {
   /// - [mode]: appender write mode.
   /// - [pubKey]: encryption public key; empty string disables encryption.
   /// - [compressMode]: compression algorithm (zlib / zstd).
-  /// - [compressLevel]: compression level 0-9 (0 = none, 6 = native default).
+  /// - [compressLevel]: compression level passed to the native backend. The Dart
+  ///   default is 6. zstd accepts positive levels (for example 1-9) and negative
+  ///   levels; 0 selects its algorithm default (3). The current zlib backend
+  ///   ignores this parameter and always uses level 9; 0 does not disable it.
   /// - [cacheDays]: days to keep cached (mmap) logs; 0 uses the native default.
   /// - [consoleLogEnabled]: also mirror logs to the system console
   ///   (logcat / Xcode).
@@ -143,7 +146,7 @@ class XLogManager {
   // the directories, encryption and compression to use. Dart only takes over
   // already-open instances to manage them: flush, query level, toggle console
   // output, list log files for upload, and close. Writing to an instance is
-  // not supported from Dart.
+  // supported through per-instance FFI bindings; Dart does not create instances.
   // ---------------------------------------------------------------------------
 
   /// Takes over an already-open native log instance by its [prefix], returning
@@ -165,7 +168,7 @@ class XLogManager {
 /// toggle console output, list files for upload, close).
 ///
 /// Obtain one via [XLogManager.getInstance] or [XLogManager.instances]. This
-/// handle does not write log entries; logging stays on the native side.
+/// handle can bind a Dart FFI writer to the existing native instance.
 class XLogInstanceHandle {
   XLogInstanceHandle._(this.prefix);
 
@@ -173,6 +176,11 @@ class XLogInstanceHandle {
   final String prefix;
 
   static pigeon.XlogConfigApi get _api => XLogManager._api;
+
+  /// Binds this instance once; retain the writer and pass a tag with each entry.
+  /// Dispose every writer before
+  /// closing its native appender. This never creates or closes an appender.
+  XLogWriter writer() => XLogger.attach(prefix);
 
   /// Flushes this instance's buffered logs to disk. When [sync] is true, blocks
   /// until the write completes (do not call on the UI thread).
@@ -192,6 +200,6 @@ class XLogInstanceHandle {
       _api.getInstanceLogFiles(prefix, timespanDays);
 
   /// Closes this instance and releases its resources. The handle should not be
-  /// used afterwards.
+  /// used afterwards. Dispose all FFI writers bound to it before calling this.
   Future<void> close() => _api.closeInstance(prefix);
 }

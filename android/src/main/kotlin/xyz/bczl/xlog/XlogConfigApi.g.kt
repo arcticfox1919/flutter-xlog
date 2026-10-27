@@ -114,7 +114,11 @@ data class XlogConfig (
   val pubKey: String,
   /** Compression algorithm for log content. */
   val compressMode: XlogCompressMode,
-  /** Compression level (0-9). 0 means no compression; 6 is the native default. */
+  /**
+   * Compression level passed to the native backend; this config defaults to 6.
+   * zstd uses this value (0 selects its algorithm default, 3). The current
+   * zlib backend ignores it and always uses level 9; 0 does not disable it.
+   */
   val compressLevel: Long,
   /** Number of days to keep cached (mmap) logs. 0 uses the native default. */
   val cacheDays: Long,

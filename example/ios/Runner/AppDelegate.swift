@@ -4,6 +4,7 @@ import xlog
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
+  private var otherLog: XLogInstance?
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -23,14 +24,24 @@ import xlog
     XLog.initialize(configuration: configuration)
     XLog.info("AppDelegate", message: "XLog initialized at \(logDirectory.path)")
 
+    let otherConfiguration = XLogConfiguration(
+      logDirectory: logDirectory.path,
+      namePrefix: "xlog_other"
+    )
+    otherConfiguration.cacheDirectory = cacheDirectory.path
+    otherConfiguration.level = .debug
+    otherConfiguration.consoleLogEnabled = true
+    guard let other = XLog.openInstance(configuration: otherConfiguration) else {
+      fatalError("Cannot initialize xlog_other")
+    }
+    otherLog = other
+    other.info("NativeOther", message: "Independent instance initialized")
+
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
-  override func applicationWillTerminate(_ application: UIApplication) {
-    XLog.flushSync()
-    XLog.close()
-    super.applicationWillTerminate(application)
-  }
+  // Keep the native appender open for the process lifetime. Collecting logs
+  // for upload can explicitly flush on a worker queue; termination needs no close.
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
