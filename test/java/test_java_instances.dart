@@ -73,9 +73,9 @@ Future<void> main(List<String> arguments) async {
         '$mars/mars/libraries/$module/src/main/java/com/tencent/mars/xlog';
     await _run(options['--javac'] ?? 'javac', [
       '-source',
-      '7',
+      '8',
       '-target',
-      '7',
+      '8',
       '-Xlint:-options',
       '-encoding',
       'UTF-8',

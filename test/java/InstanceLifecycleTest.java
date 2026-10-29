@@ -173,7 +173,8 @@ public final class InstanceLifecycleTest {
         check(result(slow) == Log.getLogInstance("slow"), "Completed creation was not published");
 
         backend.failedLookup = "lookup_failure";
-        failedOpen("lookup_failure", false);
+        check(Log.openLogInstance(config("lookup_failure")) != null,
+                "Configured creation must delegate native reuse to the native factory");
         backend.failedLookup = "";
         Log.openLogInstance(config("lookup_failure"));
         backend.failedCreate = "create_failure";

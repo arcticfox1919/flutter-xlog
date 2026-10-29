@@ -2,59 +2,108 @@
 
 [English](README.md) | 简体中文
 
-`xlog` 用来把应用日志写入文件，底层使用腾讯 Mars xlog。
-你可以在 Dart、Kotlin、Swift 和 C/C++ 中打日志，也可以把 Flutter 与原生日志分开保存。
-日志保存为压缩后的 `.xlog` 文件，需要时可以开启加密。
+`xlog` 帮助 Android 和 iOS 应用把日志保存到文件，方便排查问题和收集日志。
+支持 Flutter 与原生共用日志，也支持把不同业务的日志分开保存。
 
-Dart 写日志走 `dart:ffi`，初始化和管理操作走 Pigeon 生成的平台通道。
-不需要把每一条日志都通过平台通道传给原生。
+<a id="quick-start"></a>
+
+## 快速开始
+
+普通 Flutter 应用先使用一个默认日志实例即可。下面由 Dart 初始化，
+把日志保存到应用自己的文件目录中。
+
+如果已经在 Kotlin 或 Swift 中初始化 xlog，保留原有初始化，跳过第 2 步即可。
+如果原生代码需要在 Flutter 启动前打日志，改用
+[Android](#android-startup) 或 [iOS](#ios-startup) 启动指南。
+
+### 1. 添加依赖
+
+```sh
+flutter pub add xlog path_provider
+```
+
+这里用 `path_provider` 获取可写目录；应用已有目录管理方式时，可以沿用。
+Android 还需[配置 JitPack](#android-setup)；iOS 需将最低系统版本设为 13，
+并[安装 Pods](#ios-setup)。
+
+### 2. 在应用启动时初始化一次
+
+按下面的方式编写 `main`，保留项目自己的 `MyApp`。
+示例使用异步写入、8 MiB 文件分卷阈值和 7 天保留期。
+为减少开销，默认不输出到控制台；调试时可临时设置 `consoleLogEnabled: true`。
+
+```dart
+import 'dart:io';
+
+import 'package:flutter/widgets.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:xlog/xlog.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  final appDirectory = await getApplicationSupportDirectory();
+  final logDirectory = Directory('${appDirectory.path}/xlog/default/logs');
+  final cacheDirectory = Directory('${appDirectory.path}/xlog/default/cache');
+  await logDirectory.create(recursive: true);
+  await cacheDirectory.create(recursive: true);
+
+  await XLogManager.initialize(
+    cacheDir: cacheDirectory.path,
+    logDir: logDirectory.path,
+    namePrefix: 'flutter_app',
+    level: XLogLevel.info,
+    mode: XLogMode.async,
+    consoleLogEnabled: false,
+    maxFileSizeBytes: 8 * 1024 * 1024,
+    maxAliveTimeSeconds: 7 * 24 * 60 * 60,
+  );
+
+  XLogger.i('Startup', 'Application started');
+  runApp(const MyApp());
+}
+```
+
+日志保存在应用私有目录下的 `xlog/default/logs`，文件前缀为 `flutter_app`。
+独立的 `cache` 目录供原生缓冲使用。
+
+### 3. 开始记录日志
+
+```dart
+XLogger.i('HomePage', '打开页面');
+XLogger.w('Network', '请求超时，准备重试');
+XLogger.e('Payment', '支付失败');
+```
+
+第一个参数是 tag，用来标记日志来源；第二个参数是日志内容。
+切换 tag 仍会写入同一份默认日志。上面设为 INFO 级别，因此 verbose 和 debug 日志会被过滤。
+
+不需要每条日志都调用 flush。异步模式会先缓冲、再写入文件；需要收集日志时，
+参见[查找、上传和解码文件](#files-uploads-and-decoding)。
+压缩后的 `.xlog` 文件需要[解码](#解码)才能按文本阅读。
+
+需要把业务日志单独保存时，再看[多实例说明](#choose-your-log-destinations)。
+**默认实例与任何子实例、不同子实例之间，都必须使用独立的日志目录和缓存目录。
+不同文件前缀无法隔离目录级清理。**
 
 ## 目录
 
-- [功能与运行要求](#features-and-requirements)
+- [快速开始](#quick-start)
 - [安装](#installation)
+- [Dart API](#dart-api)
+- [配置说明](#configuration)
 - [先决定日志写到哪里](#choose-your-log-destinations)
 - [Android：在 Application 初始化](#android-startup)
 - [iOS：在 AppDelegate 初始化](#ios-startup)
-- [Dart API](#dart-api)
-- [选择 writer 和切换 tag](#instance-writers)
-- [字符串缓冲区如何复用](#string-buffers)
-- [配置说明](#configuration)
 - [查找、上传和解码文件](#files-uploads-and-decoding)
+- [生命周期与常见问题](#lifecycle-and-troubleshooting)
 - [本地 package 和 plugin 如何使用](#use-xlog-from-local-packages-and-plugins)
 - [接入原生第三方库](#third-party-native-libraries)
 - [接入 JNI 与 C++](#jni-and-c-integration)
-- [生命周期与常见问题](#lifecycle-and-troubleshooting)
+- [功能与运行要求](#features-and-requirements)
+- [字符串缓冲区如何复用](#string-buffers)
 - [开发](#development)
-
-<a id="features-and-requirements"></a>
-
-## 功能与运行要求
-
-| 功能 | 能做什么 |
-| --- | --- |
-| 六个日志级别 | verbose、debug、info、warning、error、fatal；可以设置最低级别，过滤不需要的日志。 |
-| Dart 与原生共用日志 | 启动时初始化一次，之后两边都可以写。 |
-| 多日志实例 | 把不同业务的日志分开保存、分别配置。Dart 可以写入 Kotlin／Swift 已创建的实例。 |
-| 异步／同步模式 | 平时使用后台写文件的异步模式，也可以选择在调用线程执行文件操作的同步模式。 |
-| mmap 缓冲 | 原生缓存与恢复机制可以降低缓冲日志丢失的风险，但不保证所有日志都能在进程退出后保留，也不等于崩溃上报。 |
-| 压缩 | 支持 zlib、zstd。文件需要解码后才能当作文本阅读。 |
-| 加密 | 可以配置公钥加密日志文件，解码端持有对应私钥。 |
-| 文件管理 | 按日期生成文件、按大小分卷、设置保留时间、查询日志路径。 |
-| 控制台输出 | 可以同时输出到 Android logcat 或 iOS 调试控制台。 |
-| 原生日志接口 | Kotlin 支持普通字符串、格式化参数和 Throwable 堆栈；Swift 支持字符串及源码位置信息。 |
-| 上传规划 | 根据文件名与大小记录哪些文件已经上传；存储方式和网络上传由应用自己提供。 |
-| Android 16 KB 内存页 | 原生库构建包含 16 KB 对齐设置；应用中的其他原生库和最终 APK/AAB 打包也需要兼容。 |
-
-| 平台 | 当前要求与支持范围 |
-| --- | --- |
-| Android | API 24+，compile SDK 35，JVM target 17；支持 `arm64-v8a`、`armeabi-v7a`、`x86_64`。 |
-| iOS | iOS 13+；支持 arm64 真机和 arm64 模拟器，不包含 Intel `x86_64` 模拟器切片。 |
-| Dart／Flutter | Dart `>=3.3.0 <4.0.0`；Flutter 自带的 Dart SDK 需要满足这个范围。 |
-| Windows／Linux／macOS／web | 尚未实现日志功能。仓库中的桌面目录目前只是插件模板。 |
-
-当前固定依赖 Android `com.github.arcticfox1919:xlog:1.3.7` 和 iOS `mars-xlog` `1.3.7`。
-默认写入和命名实例写入都需要匹配这两个原生依赖；原生 1.3.6 不提供当前逐条传 tag 的接口。
+- [许可证](#license)
 
 <a id="installation"></a>
 
@@ -72,7 +121,7 @@ flutter pub add xlog
 dependencies:
   flutter:
     sdk: flutter
-  xlog: ^0.2.0
+  xlog: ^0.3.0
 ```
 
 ```sh
@@ -80,6 +129,8 @@ flutter pub get
 ```
 
 应用项目正常使用 pub.dev 版本即可。只有开发 xlog 本身或测试本地修改时，才需要改用 `path` 依赖。
+
+<a id="android-setup"></a>
 
 ### Android 配置
 
@@ -101,11 +152,210 @@ allprojects {
 `dependencyResolutionManagement.repositories`。应用 `minSdk` 至少为 24，
 JDK／工具链需要支持 JVM target 17。
 
+原生 1.4.0 已包含 `maxFileSizeBytes`／`maxAliveTimeSeconds` 创建配置字段，
+两端均使用匹配的 1.4.0 依赖。
+
+<a id="ios-setup"></a>
+
 ### iOS 配置
 
 保留 Flutter 的 CocoaPods 集成，将部署版本设为 iOS 13 或更高，
 获取 Flutter 依赖后在 `ios` 目录执行 `pod install`。插件已经依赖 `mars-xlog`，
-不需要再手动拖入一份 XCFramework。开发原生代码时打开 `Runner.xcworkspace`。
+不需要再手动拖入一份 XCFramework。已有工程升级到 1.4.0 时，执行
+`pod update mars-xlog xlog` 更新锁文件。开发原生代码时打开 `Runner.xcworkspace`。
+
+## Dart API
+
+### 日常写入
+
+由 Dart 或原生完成初始化后，就可以在业务代码中记录日志：
+
+```dart
+import 'package:xlog/xlog.dart';
+
+XLogger.v('UI', 'Building the screen');
+XLogger.d('Network', 'Request started');
+XLogger.i('App', 'Application is ready');
+XLogger.w('Download', 'progress=100%');
+XLogger.e('Network', 'Request failed');
+XLogger.f('App', 'An unrecoverable application error');
+XLogger.log(XLogLevel.info, 'Custom', 'A selected log level');
+
+try {
+  throw StateError('Example failure');
+} catch (error, stackTrace) {
+  XLogger.e('App', '$error\n$stackTrace');
+}
+```
+
+Dart 消息是普通字符串，变量使用字符串插值。需要堆栈时，像上面一样把
+`stackTrace` 放入消息中，插件不会自动捕获它。
+
+级别从低到高是 `verbose < debug < info < warn < error < fatal`。
+`none` 用来关闭输出，应作为过滤阈值，不要作为某条消息的级别。
+
+```dart
+XLogger.level = XLogLevel.info; // 通过 FFI 修改全局原生过滤级别。
+final current = XLogger.level;
+
+// 实参会先求值；昂贵的诊断信息应先判断级别。
+if (XLogger.isEnabledFor(XLogLevel.debug)) {
+  XLogger.d('State', 'Details: ${buildDiagnosticSnapshot()}');
+}
+```
+
+上面的 `buildDiagnosticSnapshot` 代表应用自己的诊断代码。
+函数实参会在调用前求值；如果构造消息比较昂贵，就先判断级别。
+当前版本没有延迟生成消息的回调接口。
+
+<a id="instance-writers"></a>
+
+### 选择 writer 和切换 tag
+
+[Android](#android-startup) 和 [iOS](#ios-startup) 启动示例创建了两个日志目标：
+默认的 `flutter_app` 和命名实例 `native_app`。
+Dart 可以分别向它们写日志：
+
+```dart
+// 放在应用的日志服务中保存，后续一直复用。
+final appLog = XLogger.defaultWriter;
+final businessLog = XLogger.attach('native_app');
+
+appLog.i('Startup', '应用启动');
+appLog.i('HomePage', '打开页面'); // 换了 tag，仍写入同一份默认日志。
+
+businessLog.i('Payment', '开始支付');
+businessLog.i('HTTP', '请求完成'); // 都写入同一个业务实例。
+
+// 这条同样复用 appLog，包括它的字符串缓冲区。
+XLogger.i('UI', '点击按钮');
+```
+
+`defaultWriter` 是共享的，在调用 `XLogger.releaseDefaultWriter()` 重置绑定前，
+反复获取会返回同一个 writer。
+`attach` 每次都会创建一个 Dart writer，因此每个日志目标绑定一次，保留后反复使用即可。
+不要每打印一条日志或每换一个 tag 就调用 `attach`。前缀为空或原生实例不存在时会抛错，
+不会改写到默认实例。默认实例的文件前缀不能用于 `attach`，访问它应使用 `defaultWriter`。
+
+`XLogManager.getInstance(prefix)` 获取的是管理句柄，用来 flush、查找文件等。
+也可以调用它的 `writer()` 获取写入句柄；这个方法每次同样会新建 Dart writer。
+命名原生日志实例仍由 Kotlin／Swift 创建。
+
+每个 writer 在所属的 Dart isolate 中使用。共享的默认 writer 通常与应用同寿命。
+业务 writer 的拥有者不再需要该绑定、并已停止写入后，可以调用 `businessLog.dispose()`。
+它只释放写入句柄和字符串缓冲区，原生日志实例仍然存在，也不会因此 flush。
+如果需要主动关闭、重建原生实例，顺序是：停止该实例的 Dart 和原生写入，dispose 所有
+绑定的 writer，最后关闭原生实例。默认写入句柄使用 `XLogger.releaseDefaultWriter()` 释放。
+
+prefix 和 tag 不得包含 NUL（`U+0000`），由调用方保证，运行时不扫描检查。
+message 也使用 C 字符串，遇到内嵌 NUL 就结束。`writer.write(...)` 返回 `true` 表示
+已提交给 xlog，不代表已经写入磁盘。
+
+### 使用应用提供的目录初始化
+
+应用已经管理了日志目录时，可以使用下面的初始化函数。
+它与快速开始使用相同的 API；原生已完成初始化时，不要重复调用：
+
+```dart
+import 'package:flutter/widgets.dart';
+import 'package:xlog/xlog.dart';
+
+Future<void> configureLogging({
+  required String cacheDirectory,
+  required String logDirectory,
+}) async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await XLogManager.initialize(
+    cacheDir: cacheDirectory,
+    logDir: logDirectory,
+    namePrefix: 'flutter_app',
+    level: XLogLevel.info,
+    mode: XLogMode.async,
+    consoleLogEnabled: false,
+    maxFileSizeBytes: 8 * 1024 * 1024,
+    maxAliveTimeSeconds: 7 * 24 * 60 * 60,
+  );
+  XLogger.i('App', 'Logging is ready');
+}
+```
+
+目录由应用提供，例如在应用中使用 `path_provider` 获取可写的私有目录；
+插件不会自动选择目录。等待初始化完成后，再启动需要日志的代码。
+
+### 管理接口
+
+以下方法均为 `XLogManager` 静态方法：
+
+| API | 用途 |
+| --- | --- |
+| `initialize(...)` | 打开全局实例；原生已经初始化时不要再调用。 |
+| `flush(sync: false)` | 请求刷盘；`sync: true` 调用原生同步刷盘。 |
+| `close()` | 应用统一关闭日志。Android 后端还会关闭命名实例。 |
+| `setLevel(level)`／`getLevel()` | 通过平台通道管理级别；Android 转发到上游 Java，注意下方兼容性说明。 |
+| `setConsoleLogEnabled(enabled)` | 控制全局日志是否也输出到控制台。 |
+| `setAppenderMode(mode)` | 切换全局同步／异步模式。 |
+| `initialize(maxFileSizeBytes: ...)` | 创建时设置文件分卷阈值，单位为字节。 |
+| `initialize(maxAliveTimeSeconds: ...)` | 创建时设置文件保留时间，单位为秒。 |
+| `getInstance(prefix)` | 获取已经存在的命名实例句柄；不存在时返回 `null`，不会创建。 |
+| `instances()` | 列出命名实例句柄，不包含全局实例。 |
+
+```dart
+final nativeLog = await XLogManager.getInstance('native_app');
+if (nativeLog != null) {
+  final prefix = nativeLog.prefix;
+  final level = await nativeLog.getLevel();
+  await nativeLog.setConsoleLogEnabled(false);
+  await nativeLog.flush();
+  final today = await nativeLog.getLogFiles(timespanDays: 0);
+  // await nativeLog.close(); // 仅在应用确认可以安全关闭时执行。
+}
+```
+
+`handle.writer()` 与 `XLogger.attach(handle.prefix)` 都可以获取 writer。
+调用一次后保留复用；每次调用都会创建新的 Dart 写入句柄。管理句柄不提供实例级别、模式、
+大小或保留时间的 setter。主动关闭实例时，先停止 Dart 和原生写入，再 dispose 绑定的
+全部 Dart writer，最后关闭实例。实例关闭、重开后应丢弃旧管理句柄。
+
+<a id="configuration"></a>
+
+## 配置说明
+
+| 配置 | Dart 默认值 | Android Kotlin 全局默认值 | iOS Swift 默认值 |
+| --- | --- | --- | --- |
+| 日志目录 | 必填 `logDir` | 必填 `logDir` | 必填 `logDirectory` |
+| 缓存目录 | 必填 `cacheDir` | 必填 `cacheDir` | 可选 `cacheDirectory` |
+| 前缀 | 必填 `namePrefix` | 必填 `prefix` | 必填 `namePrefix` |
+| 最低级别 | `XLogLevel.debug` | `LogLevel.DEBUG` | `.debug` |
+| 写入模式 | `XLogMode.async` | `XLog.MODE_ASYNC` | `.async` |
+| 公钥 | `pubKey: ''` | `pubKey = ""` | `publicKey = nil` |
+| 压缩算法 | `XLogCompressMode.zlib` | `XLog.COMPRESS_ZLIB` | `.zlib` |
+| 压缩级别 | `compressLevel: 6` | `compressLevel = 0` | `compressLevel = 6` |
+| 缓存天数 | `cacheDays: 0` | `cacheDays = 0` | `cacheDays = 0` |
+| 控制台 | `consoleLogEnabled: true` | 单独设置 | `consoleLogEnabled = true` |
+| 库加载 | 平台集成负责 | `loadLib = true` | CocoaPods 链接 |
+
+Android 命名实例的创建配置与原生后端一致，运行时可调整的选项较少，详见
+[Android 启动说明](#android-startup)。
+只有宿主已经加载所需原生库时，Android 才应传入 `loadLib = false`。
+
+- 目录：使用 xlog 专用目录。原生会在目录中清理文件，不要混放其他业务数据。
+  默认实例与子实例、不同子实例之间，日志目录和缓存目录都不能共用；不同文件前缀不能替代目录隔离。
+  多进程也不要共用同一个日志目标。
+- 同步与异步：异步模式把文件写入交给后台，但格式化、压缩、加锁和控制台输出
+  仍可能消耗调用线程的时间。`flush()` 只是发起请求，不代表文件已经准备好上传。
+- 压缩：可以选择 `zstd`／`COMPRESS_ZSTD`／`.zstd`。压缩级别会转交给后端，
+  不能统一理解成“0 就是不压缩”。本次查阅的原生源码中，zlib 固定使用
+  `Z_BEST_COMPRESSION`，zstd 才使用传入级别；依赖具体调优值前，请核对实际原生版本。
+- 加密：公钥为空时关闭。密钥格式遵循后端要求，私钥留在解码端，不要放进应用。
+  加密针对文件，不会保护同时输出到控制台的明文。密钥工具见
+  [原生项目](https://github.com/arcticfox1919/xlog)。
+- 缓存天数：控制原生日志在缓存目录暂存、搬移的策略；`0` 使用后端通常行为。
+  它和日志文件保留时间是两件事，不代表所有日志只保留这么多天。
+- 分卷与保留：通过创建配置的 `maxFileSizeBytes` 和 `maxAliveTimeSeconds` 设置。
+  后端默认按日期生成文件、不按大小分卷、
+  大约保留 10 天，接受的最短保留时间为一天。建议显式配置。文件大小是分卷阈值，
+  不是总磁盘配额，也不是绝不超出的文件硬上限；过期清理也不是精确到秒的定时删除。
+  首次扫描在打开实例约两分钟后执行。多实例必须使用各自专用的日志和缓存目录。
 
 <a id="choose-your-log-destinations"></a>
 
@@ -148,6 +398,11 @@ Dart 不要再初始化一次。
 全局 `namePrefix` 只是文件名前缀，不会把全局实例注册成命名实例。
 所以 `getInstance('flutter_app')` 不是获取全局日志的方法。
 不同实例使用不同前缀和专用目录；不要通过重复打开相同前缀来修改配置。
+
+**默认日志实例和任何子实例都不得共用同一个日志保存目录或缓存目录；不同子实例之间也必须隔离目录。**
+仅设置不同的文件前缀不够：原生过期清理会扫描整个目录，不按实例前缀过滤，
+共用目录可能导致一个实例按自己的保留策略删除另一个实例的日志。
+可以使用相同的父目录，但每个实例应分配独立的日志子目录和缓存子目录，下面的双实例启动示例即采用这种布局。
 
 ### Dart 能不能创建命名实例？
 
@@ -200,10 +455,10 @@ class MyApplication : Application() {
             prefix = "flutter_app",
             level = level,
             mode = XLog.MODE_ASYNC,
+            maxFileSizeBytes = 8L * 1024 * 1024,
+            maxAliveTimeSeconds = 7L * 24 * 60 * 60,
         )
         XLog.setConsoleLogEnabled(BuildConfig.DEBUG)
-        XLog.setMaxFileSize(8L * 1024 * 1024)
-        XLog.setMaxAliveTime(7L * 24 * 60 * 60)
 
         // init 加载 libc++_shared.so 和 libmarsxlog.so 后，再创建命名实例。
         AppLogs.native = XLog.openInstance(
@@ -212,6 +467,8 @@ class MyApplication : Application() {
             prefix = "native_app",
             level = level,
             mode = XLog.MODE_ASYNC,
+            maxFileSizeBytes = 8L * 1024 * 1024,
+            maxAliveTimeSeconds = 7L * 24 * 60 * 60,
         )
         AppLogs.native.setConsoleLogEnabled(BuildConfig.DEBUG)
         AppLogs.native.i("Application", "Native logging is ready")
@@ -263,6 +520,8 @@ val network = XLog.openInstance(
     pubKey = serverPublicKey,
     level = LogLevel.INFO,
     mode = XLog.MODE_ASYNC,
+    maxFileSizeBytes = 8L * 1024 * 1024,
+    maxAliveTimeSeconds = 7L * 24 * 60 * 60,
     compressMode = XLog.COMPRESS_ZSTD,
     compressLevel = 3,
     cacheDays = 7
@@ -273,14 +532,14 @@ val network = XLog.openInstance(
 显式传 `pubKey = ""` 可创建不加密但自定义压缩的实例。原来不带 `pubKey` 的重载保持
 未加密 zlib 默认值和原有签名。实例不提供级别、模式、大小和保留时间的 setter。
 
-为配置好的实例选择唯一前缀，只创建一次。前缀已占用、公钥格式无效、后端不支持配置或
-原生创建失败时，配置工厂会抛出异常，不会悄悄复用设置不同的实例。
+前缀已有实例时复用原生实例，忽略此次传入的新配置。创建新实例时，配置无效、
+后端不支持配置或原生创建失败会抛出异常。
 需要复用时调用 `getLogInstance`；Java 调用方使用 `Log.openLogInstance(Xlog.XLogConfig)`。
 `compressLevel` 在 zstd 中生效；当前 zlib 后端固定使用级别 9，传 `0` 不会关闭压缩。
 各参数默认值和单位见[配置说明](#configuration)。
 
 Dart 只需绑定一次：`final log = XLogger.attach('network');`，然后 `log.i('HTTP', '请求完成')`。
-Android 目标使用 JitPack 依赖 `com.github.arcticfox1919:xlog:1.3.7`，
+Android 目标使用 JitPack 依赖 `com.github.arcticfox1919:xlog:1.4.0`，
 其中已包含 Java 配置重载和 writer C API。Kotlin 直接调用
 `Log.openLogInstance(config)`，创建和打印均不使用反射。
 应用仓库需配置 `https://jitpack.io`，按前面的 Android 接入示例即可使用。
@@ -324,12 +583,12 @@ enum AppLogs {
     flutter.level = level
     flutter.mode = .async
     flutter.consoleLogEnabled = consoleEnabled
+    flutter.maxFileSizeBytes = 8 * 1024 * 1024
+    flutter.maxAliveTimeSeconds = 7 * 24 * 60 * 60
     guard XLog.initialize(configuration: flutter) else {
       throw NSError(domain: "AppLogs", code: 1,
                     userInfo: [NSLocalizedDescriptionKey: "Cannot open flutter_app"])
     }
-    XLog.setMaxFileSize(8 * 1024 * 1024)
-    XLog.setMaxAliveTime(7 * 24 * 60 * 60)
 
     let config = XLogConfiguration(
       logDirectory: try directory("native"), namePrefix: "native_app"
@@ -338,12 +597,12 @@ enum AppLogs {
     config.level = level
     config.mode = .async
     config.consoleLogEnabled = consoleEnabled
+    config.maxFileSizeBytes = 8 * 1024 * 1024
+    config.maxAliveTimeSeconds = 7 * 24 * 60 * 60
     guard let instance = XLog.openInstance(configuration: config) else {
       throw NSError(domain: "AppLogs", code: 2,
                     userInfo: [NSLocalizedDescriptionKey: "Cannot open native_app"])
     }
-    instance.setMaxFileSize(8 * 1024 * 1024)
-    instance.setMaxAliveTime(7 * 24 * 60 * 60)
     native = instance
     instance.info("AppDelegate", message: "Native logging is ready")
   }
@@ -388,8 +647,8 @@ XLog.info("Shared", message: "This global call goes to flutter_app")
 全局和实例的 `log` 方法都能传文件名、函数名和行号。
 Swift 的变量和错误信息通过字符串插值拼接，没有 Kotlin 那样的 Throwable 重载。
 
-与 Android 不同，iOS 命名实例还支持可写的 `level`、`isClosed`、
-`setAppenderMode`、`setMaxFileSize`、`setMaxAliveTime`。
+与 Android 不同，iOS 命名实例还支持可写的 `level`、只读的 `isClosed` 和
+`setAppenderMode`。双端的文件大小和保留时间均通过创建配置设置，不提供运行时 setter。
 全局和实例都有 `flush`、`flushSync`、控制台设置和 `close`；实例通过
 `logFiles(timeSpanDays:)` 查文件。也可以用 `XLog.closeInstance(namePrefix:)`
 按前缀关闭。`XLogConfiguration` 支持 `NSCopying`，可以先复制配置，再为新实例调整参数。
@@ -401,8 +660,8 @@ Swift 的变量和错误信息通过字符串插值拼接，没有 Kotlin 那样
 | 级别 | `setLevel(LogLevel.INFO)`、`getLevel()` | `level = .info`、`level` |
 | 控制台 | `setConsoleLogEnabled(false)` | `setConsoleLogEnabled(false)` |
 | 模式 | `setAppenderMode(XLog.MODE_ASYNC)` | `setAppenderMode(.async)` |
-| 文件大小 | `setMaxFileSize(8L * 1024 * 1024)` | `setMaxFileSize(8 * 1024 * 1024)` |
-| 保留时间 | `setMaxAliveTime(7L * 24 * 60 * 60)` | `setMaxAliveTime(7 * 24 * 60 * 60)` |
+| 文件大小 | `maxFileSizeBytes = 8L * 1024 * 1024` | `maxFileSizeBytes = 8 * 1024 * 1024` |
+| 保留时间 | `maxAliveTimeSeconds = 7L * 24 * 60 * 60` | `maxAliveTimeSeconds = 7 * 24 * 60 * 60` |
 | 刷盘 | `flush()`、`flushSync()` | `flush()`、`flushSync()` |
 | 关闭 | `close()`、`closeInstance(prefix)` | `close()`、`closeInstance(namePrefix:)` |
 | 查找／列出命名实例 | `getLogInstance(prefix)`、`instancePrefixes()` | `instance(namePrefix:)`、`instanceNamePrefixes` |
@@ -411,228 +670,6 @@ Swift 的变量和错误信息通过字符串插值拼接，没有 Kotlin 那样
 文件大小单位是字节，保留时间单位是秒。
 Android 还有 `setToastContext(context)`，用于后端的 fatal 日志 Toast 支持；
 传入 `null` 可清除引用，避免长时间持有 Activity。后面的级别兼容性和关闭注意事项同样适用。
-
-## Dart API
-
-### 原生初始化后直接写日志
-
-```dart
-import 'package:xlog/xlog.dart';
-
-XLogger.v('UI', 'Building the screen');
-XLogger.d('Network', 'Request started');
-XLogger.i('App', 'Application is ready');
-XLogger.w('Download', 'progress=100%');
-XLogger.e('Network', 'Request failed');
-XLogger.f('App', 'An unrecoverable application error');
-XLogger.log(XLogLevel.info, 'Custom', 'A selected log level');
-
-try {
-  throw StateError('Example failure');
-} catch (error, stackTrace) {
-  XLogger.e('App', '$error\n$stackTrace');
-}
-```
-
-Dart 消息是普通字符串，变量使用字符串插值。需要堆栈时，像上面一样把
-`stackTrace` 放入消息中，插件不会自动捕获它。
-
-级别从低到高是 `verbose < debug < info < warn < error < fatal`。
-`none` 用来关闭输出，应作为过滤阈值，不要作为某条消息的级别。
-
-```dart
-XLogger.level = XLogLevel.info; // 通过 FFI 修改全局原生过滤级别。
-final current = XLogger.level;
-
-// 实参会先求值；昂贵的诊断信息应先判断级别。
-if (XLogger.isEnabledFor(XLogLevel.debug)) {
-  XLogger.d('State', 'Details: ${buildDiagnosticSnapshot()}');
-}
-```
-
-上面的 `buildDiagnosticSnapshot` 代表应用自己的诊断代码。
-函数实参会在调用前求值；如果构造消息比较昂贵，就先判断级别。
-当前版本没有延迟生成消息的回调接口。
-
-<a id="instance-writers"></a>
-
-### 选择 writer 和切换 tag
-
-上面的原生启动示例创建了两个日志目标：默认的 `flutter_app` 和命名实例 `native_app`。
-Dart 可以分别向它们写日志：
-
-```dart
-// 放在应用的日志服务中保存，后续一直复用。
-final appLog = XLogger.defaultWriter;
-final businessLog = XLogger.attach('native_app');
-
-appLog.i('Startup', '应用启动');
-appLog.i('HomePage', '打开页面'); // 换了 tag，仍写入同一份默认日志。
-
-businessLog.i('Payment', '开始支付');
-businessLog.i('HTTP', '请求完成'); // 都写入同一个业务实例。
-
-// 这条同样复用 appLog，包括它的字符串缓冲区。
-XLogger.i('UI', '点击按钮');
-```
-
-`defaultWriter` 是共享的，在调用 `XLogger.releaseDefaultWriter()` 重置绑定前，
-反复获取会返回同一个 writer。
-`attach` 每次都会创建一个 Dart writer，因此每个日志目标绑定一次，保留后反复使用即可。
-不要每打印一条日志或每换一个 tag 就调用 `attach`。前缀为空或原生实例不存在时会抛错，
-不会改写到默认实例。默认实例的文件前缀不能用于 `attach`，访问它应使用 `defaultWriter`。
-
-`XLogManager.getInstance(prefix)` 获取的是管理句柄，用来 flush、查找文件等。
-也可以调用它的 `writer()` 获取写入句柄；这个方法每次同样会新建 Dart writer。
-命名原生日志实例仍由 Kotlin／Swift 创建。
-
-每个 writer 在所属的 Dart isolate 中使用。共享的默认 writer 通常与应用同寿命。
-业务 writer 的拥有者不再需要该绑定、并已停止写入后，可以调用 `businessLog.dispose()`。
-它只释放写入句柄和字符串缓冲区，原生日志实例仍然存在，也不会因此 flush。
-如果需要主动关闭、重建原生实例，顺序是：停止该实例的 Dart 和原生写入，dispose 所有
-绑定的 writer，最后关闭原生实例。默认写入句柄使用 `XLogger.releaseDefaultWriter()` 释放。
-
-prefix 和 tag 不得包含 NUL（`U+0000`），由调用方保证，运行时不扫描检查。
-message 也使用 C 字符串，遇到内嵌 NUL 就结束。`writer.write(...)` 返回 `true` 表示
-已提交给 xlog，不代表已经写入磁盘。
-
-<a id="string-buffers"></a>
-
-### 字符串缓冲区如何复用
-
-每个 writer 都有两块原生工作内存，分别处理 tag 和 message。默认 writer 和命名实例
-writer 都使用这套机制：
-
-| 缓冲区 | 初始容量 | 最大常驻容量 |
-| --- | ---: | ---: |
-| tag | 256 字节 | 512 字节 |
-| message | 2 KiB | 8 KiB |
-
-容量按 UTF-8 编码后的字节数计算，包含末尾的 NUL 结束字节；一个汉字可能占多个字节。
-这是内部默认配置，公共日志接口暂不提供容量设置参数。
-
-这两块内存每次只处理正在提交的那一条日志，不会把所有历史日志堆在里面。
-例如连续打印 100 条、每条 1 KiB 的消息，同一块 2 KiB 的 message 缓冲区就能反复使用：
-
-1. 把第 1 条消息编码到缓冲区，调用 C 接口。
-2. C 在返回 Dart 之前读取完这条字符串。
-3. 第 2 条覆盖同一块缓冲区，继续提交，之后依次复用。
-
-异步写文件所需的数据由 xlog 自己的原生缓冲保存，不会继续借用这块 Dart 侧工作内存。
-所以打印条数增加，不会让这里的常驻缓冲不断变大。
-
-单条字符串在常驻上限内时，缓冲区按需扩容，之后继续复用。超出上限时，为这一条单独
-申请临时内存，日志调用结束后立即释放，包括被级别过滤的情况，不会撑大常驻缓冲。
-这里的 8 KiB 限制的是桥接层保留的工作内存；超长日志最终能输出多少，还受原生格式化器
-自身的长度限制影响。
-
-tag 只缓存上一次能够放进复用缓冲区的编码，连续相同 tag 可以直接复用；超大 tag 每次
-提交后都会释放。换 tag 不会创建新 writer 或日志实例。每个 writer 的这两块常驻缓冲
-合计最多 8.5 KiB，不包含 Dart 对象、临时编码数据及 xlog 后端自己的原生缓冲。
-
-编码直接复用 `package:ffi` 的 `toNativeUtf8` 和 Dart 标准库，会产生临时 Dart 字节数组，
-再复制到原生内存。复用缓冲减少的是原生分配次数，编码本身仍有成本；构造消息较昂贵时，
-先调用 `writer.isEnabledFor(level)` 再拼接内容。
-
-### 也可以选择由 Dart 初始化
-
-如果原生在 Flutter 启动前不需要打日志，可以改由 Dart 创建全局实例。
-这是另一种初始化方式，不要与 Application／AppDelegate 初始化重复使用：
-
-```dart
-import 'package:flutter/widgets.dart';
-import 'package:xlog/xlog.dart';
-
-Future<void> configureLogging({
-  required String cacheDirectory,
-  required String logDirectory,
-}) async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await XLogManager.initialize(
-    cacheDir: cacheDirectory,
-    logDir: logDirectory,
-    namePrefix: 'flutter_app',
-    level: XLogLevel.info,
-    mode: XLogMode.async,
-    consoleLogEnabled: false,
-  );
-  XLogger.i('App', 'Logging is ready');
-}
-```
-
-目录由应用提供，例如在应用中使用 `path_provider` 获取可写的私有目录；
-插件不会自动选择目录。等待初始化完成后，再启动需要日志的代码。
-
-### 管理接口
-
-以下方法均为 `XLogManager` 静态方法：
-
-| API | 用途 |
-| --- | --- |
-| `initialize(...)` | 打开全局实例；原生已经初始化时不要再调用。 |
-| `flush(sync: false)` | 请求刷盘；`sync: true` 调用原生同步刷盘。 |
-| `close()` | 应用统一关闭日志。Android 后端还会关闭命名实例。 |
-| `setLevel(level)`／`getLevel()` | 通过平台通道管理级别；Android 转发到上游 Java，注意下方兼容性说明。 |
-| `setConsoleLogEnabled(enabled)` | 控制全局日志是否也输出到控制台。 |
-| `setAppenderMode(mode)` | 切换全局同步／异步模式。 |
-| `setMaxFileSize(bytes)` | 设置全局文件分卷阈值，单位为字节。 |
-| `setMaxAliveSeconds(seconds)` | 设置全局文件保留时间，单位为秒。 |
-| `getInstance(prefix)` | 获取已经存在的命名实例句柄；不存在时返回 `null`，不会创建。 |
-| `instances()` | 列出命名实例句柄，不包含全局实例。 |
-
-```dart
-final nativeLog = await XLogManager.getInstance('native_app');
-if (nativeLog != null) {
-  final prefix = nativeLog.prefix;
-  final level = await nativeLog.getLevel();
-  await nativeLog.setConsoleLogEnabled(false);
-  await nativeLog.flush();
-  final today = await nativeLog.getLogFiles(timespanDays: 0);
-  // await nativeLog.close(); // 仅在应用确认可以安全关闭时执行。
-}
-```
-
-`handle.writer()` 与 `XLogger.attach(handle.prefix)` 都可以获取 writer。
-调用一次后保留复用；每次调用都会创建新的 Dart 写入句柄。管理句柄不提供实例级别、模式、
-大小或保留时间的 setter。主动关闭实例时，先停止 Dart 和原生写入，再 dispose 绑定的
-全部 Dart writer，最后关闭实例。实例关闭、重开后应丢弃旧管理句柄。
-
-<a id="configuration"></a>
-
-## 配置说明
-
-| 配置 | Dart 默认值 | Android Kotlin 全局默认值 | iOS Swift 默认值 |
-| --- | --- | --- | --- |
-| 日志目录 | 必填 `logDir` | 必填 `logDir` | 必填 `logDirectory` |
-| 缓存目录 | 必填 `cacheDir` | 必填 `cacheDir` | 可选 `cacheDirectory` |
-| 前缀 | 必填 `namePrefix` | 必填 `prefix` | 必填 `namePrefix` |
-| 最低级别 | `XLogLevel.debug` | `LogLevel.DEBUG` | `.debug` |
-| 写入模式 | `XLogMode.async` | `XLog.MODE_ASYNC` | `.async` |
-| 公钥 | `pubKey: ''` | `pubKey = ""` | `publicKey = nil` |
-| 压缩算法 | `XLogCompressMode.zlib` | `XLog.COMPRESS_ZLIB` | `.zlib` |
-| 压缩级别 | `compressLevel: 6` | `compressLevel = 0` | `compressLevel = 6` |
-| 缓存天数 | `cacheDays: 0` | `cacheDays = 0` | `cacheDays = 0` |
-| 控制台 | `consoleLogEnabled: true` | 单独设置 | `consoleLogEnabled = true` |
-| 库加载 | 平台集成负责 | `loadLib = true` | CocoaPods 链接 |
-
-Android 命名实例的创建配置与原生后端一致，运行时 setter 仍较少，详见前面的 Android 部分。
-只有宿主已经加载所需原生库时，Android 才应传入 `loadLib = false`。
-
-- 目录：使用 xlog 专用目录。原生会在目录中清理文件，不要混放其他业务数据。
-  多进程也不要共用同一个日志目标。
-- 同步与异步：异步模式把文件写入交给后台，但格式化、压缩、加锁和控制台输出
-  仍可能消耗调用线程的时间。`flush()` 只是发起请求，不代表文件已经准备好上传。
-- 压缩：可以选择 `zstd`／`COMPRESS_ZSTD`／`.zstd`。压缩级别会转交给后端，
-  不能统一理解成“0 就是不压缩”。本次查阅的原生源码中，zlib 固定使用
-  `Z_BEST_COMPRESSION`，zstd 才使用传入级别；依赖具体调优值前，请核对实际原生版本。
-- 加密：公钥为空时关闭。密钥格式遵循后端要求，私钥留在解码端，不要放进应用。
-  加密针对文件，不会保护同时输出到控制台的明文。密钥工具见
-  [原生项目](https://github.com/arcticfox1919/xlog)。
-- 缓存天数：控制原生日志在缓存目录暂存、搬移的策略；`0` 使用后端通常行为。
-  它和日志文件保留时间是两件事，不代表所有日志只保留这么多天。
-- 分卷与保留：初始化后设置。查阅的后端默认按日期生成文件、不按大小分卷、
-  大约保留 10 天，接受的最短保留时间为一天。建议显式配置。文件大小是分卷阈值，
-  不是总磁盘配额，也不是绝不超出的文件硬上限；过期清理也不是精确到秒的定时删除。
 
 <a id="files-uploads-and-decoding"></a>
 
@@ -703,6 +740,34 @@ Future<XLogUploadResult> uploadNativeLogs(
 如需命令行脚本，也可使用[原生项目](https://github.com/arcticfox1919/xlog)的
 `mars/xlog/crypt`，选择与日志格式、加密和压缩方式匹配的脚本。
 
+<a id="lifecycle-and-troubleshooting"></a>
+
+## 生命周期与常见问题
+
+- 只初始化一次，并且尽早初始化。之后再启动会打日志的 SDK。Hot restart 不会
+  重启 Application／AppDelegate，不要因此在 Dart 重新打开全局日志。
+- 应用统一管理关闭。SDK 不要关闭共用的全局实例；Dart 关闭也会影响原生写入。
+  关闭命名实例前先停止写入，不要假定两端的全局 flush／close 对所有实例的行为完全相同。
+- 同步刷盘不要放在主线程。原生 `flushSync` 会阻塞。当前 Pigeon handler 使用
+  默认线程，Dart 返回 `Future` 不代表 `flush(sync: true)` 自动到了原生后台。
+  日常使用异步 flush；确实需要同步时，在原生后台任务中协调执行。
+- 实例可以与进程同寿命，无需专门添加退出 close／flush 钩子。下次启动时，使用相同
+  目录和前缀重新初始化即可；收集上传日志前按需 flush。Android `Application.onTerminate()`
+  和 iOS 终止回调都不适合作为保存最后日志的保证，进程被强制结束时仍可能丢失缓冲数据。
+- 多进程使用不同日志目标。Android 每个应用进程都会执行 Application；独立进程
+  使用不同目录／前缀。同一进程内的 isolate 或 Flutter engine 仍共用原生全局后端。
+- Android 动态级别：`XLogManager.setLevel` 转给 `Log.setLevel`，查阅的原生源码中
+  该 Java 方法没有更新 C++ 级别。Dart 可以使用 `XLogger.level = ...` 设置全局 FFI
+  阈值，原生可用 `xlogger_SetLevel`。依赖 Kotlin setter 前请核对实际后端版本。
+- 没有日志文件：检查初始化顺序、目录权限、过滤级别和异步缓冲是否已刷出。
+  控制台有输出不代表文件一定写成功。初始化可能失败，也可能忽略重复打开，不能用它更新配置。
+- Android 构建失败：检查宿主 JitPack、ABI、CMake 导入和后端版本是否统一。
+  插件已通过 consumer R8 规则保留 JNI 读取的 `XLogConfig` 和 `XLoggerInfo` 字段。
+  如果自定义 release 混淆仍破坏 JNI 查找，在应用 R8 配置中保留后端类及配置字段，例如
+  `-keep class com.tencent.mars.xlog.** { *; }`。
+- iOS 构建失败：使用 Pods workspace 和正确的 XCFramework 切片。Intel 模拟器
+  需要另外构建原生库。FFI 查不到符号时，检查 release 二进制导出与自定义链接裁剪设置。
+
 <a id="use-xlog-from-local-packages-and-plugins"></a>
 
 ## 本地 package 和 plugin 如何使用
@@ -735,7 +800,7 @@ workspace/
 dependencies:
   flutter:
     sdk: flutter
-  xlog: ^0.2.0
+  xlog: ^0.3.0
 ```
 
 然后在这个 package 的 Dart 文件中调用：
@@ -761,7 +826,7 @@ package 不需要再初始化。app 像平时一样用 `path` 依赖这个本地
 dependencies:
   flutter:
     sdk: flutter
-  xlog: ^0.2.0
+  xlog: ^0.3.0
 ```
 
 放在 `dependencies`，不要放在 `dev_dependencies`。即使只有 Kotlin 使用 xlog，
@@ -774,7 +839,7 @@ app 自己也调用 xlog 的 Dart 或原生 API 时，保留对 xlog 的直接�
 dependencies:
   flutter:
     sdk: flutter
-  xlog: ^0.2.0
+  xlog: ^0.3.0
   feature_package:
     path: ../packages/feature_package
   device_plugin:
@@ -918,7 +983,7 @@ Runner 中的 Swift 使用 `import xlog`。Objective-C 可以导入生成的 Swi
 也能直接访问。直接使用底层后端的原生 SDK，可以在 podspec 中添加：
 
 ```ruby
-s.dependency 'mars-xlog', '1.3.7'
+s.dependency 'mars-xlog', '1.4.0'
 ```
 
 CocoaPods 可以将它与 Flutter 插件的依赖解析到同一份后端。
@@ -1066,32 +1131,65 @@ SDK 提供 C 日志回调时，可以接到上述任一辅助函数。
 参见 [Flutter 原生链接说明](https://docs.flutter.dev/platform-integration/legacy-ffi-plugin#dynamic-versus-static-linking)。
 上面这些 C++ 调用本身不需要新增 Dart 桥接。
 
-<a id="lifecycle-and-troubleshooting"></a>
+<a id="features-and-requirements"></a>
 
-## 生命周期与常见问题
+## 功能与运行要求
 
-- 只初始化一次，并且尽早初始化。之后再启动会打日志的 SDK。Hot restart 不会
-  重启 Application／AppDelegate，不要因此在 Dart 重新打开全局日志。
-- 应用统一管理关闭。SDK 不要关闭共用的全局实例；Dart 关闭也会影响原生写入。
-  关闭命名实例前先停止写入，不要假定两端的全局 flush／close 对所有实例的行为完全相同。
-- 同步刷盘不要放在主线程。原生 `flushSync` 会阻塞。当前 Pigeon handler 使用
-  默认线程，Dart 返回 `Future` 不代表 `flush(sync: true)` 自动到了原生后台。
-  日常使用异步 flush；确实需要同步时，在原生后台任务中协调执行。
-- 实例可以与进程同寿命，无需专门添加退出 close／flush 钩子。下次启动时，使用相同
-  目录和前缀重新初始化即可；收集上传日志前按需 flush。Android `Application.onTerminate()`
-  和 iOS 终止回调都不适合作为保存最后日志的保证，进程被强制结束时仍可能丢失缓冲数据。
-- 多进程使用不同日志目标。Android 每个应用进程都会执行 Application；独立进程
-  使用不同目录／前缀。同一进程内的 isolate 或 Flutter engine 仍共用原生全局后端。
-- Android 动态级别：`XLogManager.setLevel` 转给 `Log.setLevel`，查阅的原生源码中
-  该 Java 方法没有更新 C++ 级别。Dart 可以使用 `XLogger.level = ...` 设置全局 FFI
-  阈值，原生可用 `xlogger_SetLevel`。依赖 Kotlin setter 前请核对实际后端版本。
-- 没有日志文件：检查初始化顺序、目录权限、过滤级别和异步缓冲是否已刷出。
-  控制台有输出不代表文件一定写成功。初始化可能失败，也可能忽略重复打开，不能用它更新配置。
-- Android 构建失败：检查宿主 JitPack、ABI、CMake 导入和后端版本是否统一。
-  如果 release 混淆破坏 JNI 查找，在应用 R8 配置中保留后端类及配置字段，例如
-  `-keep class com.tencent.mars.xlog.** { *; }`。
-- iOS 构建失败：使用 Pods workspace 和正确的 XCFramework 切片。Intel 模拟器
-  需要另外构建原生库。FFI 查不到符号时，检查 release 二进制导出与自定义链接裁剪设置。
+- Dart、Kotlin、Swift、C/C++ 都能写日志，可以共用文件，也可以按实例分开保存。
+- 支持日志级别过滤、控制台输出，以及异步或同步写入。
+- 支持 zlib/zstd 压缩、可选加密、文件分卷和过期清理。
+- 提供文件查询和上传记录管理；存储与网络上传由应用自己实现。
+
+| 平台 | 运行要求 |
+| --- | --- |
+| Android | Android 7.0／API 24+；compile SDK 35；JDK／工具链支持 JVM target 17。 |
+| iOS | iOS 13+；支持 arm64 真机和 arm64 模拟器，不包含 Intel 模拟器。 |
+| Dart | `>=3.3.0 <4.0.0`，搭配兼容的 Flutter SDK。 |
+
+Android 支持 `arm64-v8a`、`armeabi-v7a`、`x86_64`。
+Windows、Linux、macOS 和 web 尚未实现日志功能。
+原生依赖为 Android `com.github.arcticfox1919:xlog:1.4.0` 和 iOS `mars-xlog` `1.4.0`。
+
+<a id="string-buffers"></a>
+
+## 字符串缓冲区如何复用
+
+Dart 每条日志通过 FFI 直接提交给原生。初始化和管理操作使用平台通道，
+不会把每条日志都通过平台通道传递。
+
+每个 writer 都有两块原生工作内存，分别处理 tag 和 message。默认 writer 和命名实例
+writer 都使用这套机制：
+
+| 缓冲区 | 初始容量 | 最大常驻容量 |
+| --- | ---: | ---: |
+| tag | 256 字节 | 512 字节 |
+| message | 2 KiB | 8 KiB |
+
+容量按 UTF-8 编码后的字节数计算，包含末尾的 NUL 结束字节；一个汉字可能占多个字节。
+这是内部默认配置，公共日志接口暂不提供容量设置参数。
+
+这两块内存每次只处理正在提交的那一条日志，不会把所有历史日志堆在里面。
+例如连续打印 100 条、每条 1 KiB 的消息，同一块 2 KiB 的 message 缓冲区就能反复使用：
+
+1. 把第 1 条消息编码到缓冲区，调用 C 接口。
+2. C 在返回 Dart 之前读取完这条字符串。
+3. 第 2 条覆盖同一块缓冲区，继续提交，之后依次复用。
+
+异步写文件所需的数据由 xlog 自己的原生缓冲保存，不会继续借用这块 Dart 侧工作内存。
+所以打印条数增加，不会让这里的常驻缓冲不断变大。
+
+单条字符串在常驻上限内时，缓冲区按需扩容，之后继续复用。超出上限时，为这一条单独
+申请临时内存，日志调用结束后立即释放，包括被级别过滤的情况，不会撑大常驻缓冲。
+这里的 8 KiB 限制的是桥接层保留的工作内存；超长日志最终能输出多少，还受原生格式化器
+自身的长度限制影响。
+
+tag 只缓存上一次能够放进复用缓冲区的编码，连续相同 tag 可以直接复用；超大 tag 每次
+提交后都会释放。换 tag 不会创建新 writer 或日志实例。每个 writer 的这两块常驻缓冲
+合计最多 8.5 KiB，不包含 Dart 对象、临时编码数据及 xlog 后端自己的原生缓冲。
+
+编码直接复用 `package:ffi` 的 `toNativeUtf8` 和 Dart 标准库，会产生临时 Dart 字节数组，
+再复制到原生内存。复用缓冲减少的是原生分配次数，编码本身仍有成本；构造消息较昂贵时，
+先调用 `writer.isEnabledFor(level)` 再拼接内容。
 
 <a id="development"></a>
 
@@ -1113,8 +1211,8 @@ dart run ffigen --config ffigen.yaml
 ```
 
 `ffigen.yaml` 包含本机 LLVM 路径和 Windows 头文件 shim，换机器后需要调整，并核对目标
-ABI。插件声明的原生依赖是 Android `com.github.arcticfox1919:xlog:1.3.7` 和 iOS
-`mars-xlog` `1.3.7`。分析后端行为时使用匹配的源码和二进制；旧二进制可能在 FFI 首次解析
+ABI。插件声明的原生依赖是 Android `com.github.arcticfox1919:xlog:1.4.0` 和 iOS
+`mars-xlog` `1.4.0`。分析后端行为时使用匹配的源码和二进制；旧二进制可能在 FFI 首次解析
 所需符号时失败，当前实现不兼容 1.3.6 的旧 writer 接口。
 
 Android 使用 Gradle 远程依赖，无需配置本地 AAR 加载。在 `example/` 目录验证集成：
@@ -1125,7 +1223,12 @@ flutter build apk --debug
 ```
 
 iOS 的 CocoaPods／XCFramework 构建与链接验证需要在 macOS 上完成。
-启动接入见[示例应用](example)；后端源码、构建脚本、密钥工具和解码器见
+示例应用演示启动接入、默认实例与子实例的独立写入，并提供 1,000／10,000 条测试按钮，
+每条正文固定为 256 字节 UTF-8，分别反馈提交耗时和同步刷写耗时。
+性能比较请在真机使用 Profile 或 Release 模式；测量口径和原生依赖准备要求见
+[示例应用说明](example/README.zh-CN.md)。
+
+后端源码、构建脚本、密钥工具和解码器见
 [原生项目](https://github.com/arcticfox1919/xlog)。Android 最终打包还需满足
 [16 KB 内存页要求](https://developer.android.com/guide/practices/page-sizes)。
 
@@ -1164,6 +1267,8 @@ dart run test/java/test_java_instances.dart --mars-root /path/to/xlog --javac /j
 
 Flutter 构建和这些开发脚本都不依赖 Python。`tool/decode_xlog.py` 是独立命令行解码工具，
 不属于插件运行时。图形化工具见[解码](#解码)。
+
+<a id="license"></a>
 
 ## 许可证
 

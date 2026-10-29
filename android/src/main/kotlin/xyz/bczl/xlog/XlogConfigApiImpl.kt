@@ -22,6 +22,8 @@ class XlogConfigApiImpl : XlogConfigApi {
             compressMode = config.compressMode.toCompressMode(),
             compressLevel = config.compressLevel.toInt(),
             cacheDays = config.cacheDays.toInt(),
+            maxFileSizeBytes = config.maxFileSizeBytes,
+            maxAliveTimeSeconds = config.maxAliveTimeSeconds,
         )
         XLog.setConsoleLogEnabled(config.consoleLogEnabled)
     }
@@ -46,14 +48,6 @@ class XlogConfigApiImpl : XlogConfigApi {
 
     override fun setAppenderMode(mode: XlogMode) {
         XLog.setAppenderMode(mode.toAppenderMode())
-    }
-
-    override fun setMaxFileSize(maxBytes: Long) {
-        XLog.setMaxFileSize(maxBytes)
-    }
-
-    override fun setMaxAliveSeconds(seconds: Long) {
-        XLog.setMaxAliveTime(seconds)
     }
 
     // -------------------------------------------------------------------------

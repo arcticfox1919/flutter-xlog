@@ -3,8 +3,7 @@ import 'package:pigeon/pigeon.dart';
 @ConfigurePigeon(
   PigeonOptions(
     dartOut: 'lib/src/generated/xlog_config.g.dart',
-    kotlinOut:
-        'android/src/main/kotlin/xyz/bczl/xlog/XlogConfigApi.g.kt',
+    kotlinOut: 'android/src/main/kotlin/xyz/bczl/xlog/XlogConfigApi.g.kt',
     kotlinOptions: KotlinOptions(package: 'xyz.bczl.xlog'),
     swiftOut: 'ios/Classes/XlogConfigApi.g.swift',
     dartPackageName: 'xlog',
@@ -56,6 +55,8 @@ class XlogConfig {
     this.compressLevel = 6,
     this.cacheDays = 0,
     this.consoleLogEnabled = true,
+    this.maxFileSizeBytes = 0,
+    this.maxAliveTimeSeconds = 10 * 24 * 60 * 60,
   });
 
   /// Memory-mapped cache directory (e.g. context.cacheDir on Android).
@@ -89,6 +90,12 @@ class XlogConfig {
 
   /// Whether logs are also mirrored to the system console (logcat / Xcode).
   bool consoleLogEnabled;
+
+  /// Creation-only file splitting threshold in bytes; 0 disables size splitting.
+  int maxFileSizeBytes;
+
+  /// Creation-only expiry threshold in seconds; minimum one day, default ten.
+  int maxAliveTimeSeconds;
 }
 
 /// Initialization and configuration API for xlog.
@@ -122,14 +129,6 @@ abstract class XlogConfigApi {
   /// Switches the appender write mode at runtime. Must be called after
   /// [initialize].
   void setAppenderMode(XlogMode mode);
-
-  /// Sets the maximum size in bytes of a single log file; the appender rolls
-  /// to a new file once exceeded. Must be called after [initialize].
-  void setMaxFileSize(int maxBytes);
-
-  /// Sets the maximum retention time in seconds for log files; older files are
-  /// deleted automatically. Must be called after [initialize].
-  void setMaxAliveSeconds(int seconds);
 
   // ---------------------------------------------------------------------------
   // Multi-instance management.

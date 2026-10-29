@@ -80,33 +80,36 @@ public final class ConfiguredInstanceTest {
         Class<?> levelType = Class.forName("xyz.bczl.xlog.LogLevel");
         Object warning = levelType.getField("WARNING").get(null);
         Method factory = facade.getMethod("openInstance", String.class, String.class,
-                String.class, String.class, levelType, int.class, int.class, int.class, int.class);
+                String.class, String.class, levelType, int.class, int.class, int.class, int.class,
+                long.class, long.class);
         Object writer = factory.invoke(singleton, "/kcache", "/klogs", "kotlin_config",
-                PUBLIC_KEY, warning, Xlog.AppednerModeSync, Xlog.ZSTD_MODE, 4, 9);
+                PUBLIC_KEY, warning, Xlog.AppednerModeSync, Xlog.ZSTD_MODE, 4, 9,
+                (1L << 33) + 123, (1L << 32) + 456);
         Xlog.XLogConfig config = backend.received;
         check(config.level == Xlog.LEVEL_WARNING && config.mode == Xlog.AppednerModeSync
                 && "/kcache".equals(config.cachedir) && "/klogs".equals(config.logdir)
                 && "kotlin_config".equals(config.nameprefix) && PUBLIC_KEY.equals(config.pubkey)
                 && config.compressmode == Xlog.ZSTD_MODE && config.compresslevel == 4
-                && config.cachedays == 9, "Kotlin must forward all nine configuration fields");
+                && config.cachedays == 9 && config.maxFileSizeBytes == (1L << 33) + 123
+                && config.maxAliveTimeSeconds == (1L << 32) + 456,
+                "Kotlin must forward the complete creation configuration without narrowing");
         long expectedTarget = 100 + backend.opens;
         writer.getClass().getMethod("i", String.class, String.class)
                 .invoke(writer, "HTTP", "Kotlin 100% %s literal");
         check(backend.lastWrite == expectedTarget && "Kotlin 100% %s literal".equals(backend.message),
                 "Kotlin writer must address the configured instance without formatting plain text");
-        try {
-            factory.invoke(singleton, "/kcache", "/klogs", "kotlin_config",
-                    PUBLIC_KEY, warning, 0, 1, 3, 0);
-            throw new AssertionError("Kotlin must reject duplicate configured prefixes");
-        } catch (java.lang.reflect.InvocationTargetException error) {
-            check(error.getCause() instanceof IllegalStateException,
-                    "Kotlin must unwrap the Java factory exception");
-        }
+        int before = backend.opens;
+        Object reused = factory.invoke(singleton, "/other-cache", "/other-logs", "kotlin_config",
+                "invalid-but-ignored", warning, 0, 1, 3, 0, -1L, 0L);
+        reused.getClass().getMethod("i", String.class, String.class).invoke(reused, "HTTP", "reused");
+        check(backend.opens == before && backend.lastWrite == expectedTarget,
+                "Kotlin must reuse the native instance without applying new settings");
         Method oldFactory = facade.getMethod("openInstance", String.class, String.class,
                 String.class, levelType, int.class, int.class);
         oldFactory.invoke(singleton, "/kcache", "/klogs", "kotlin_legacy", warning, 0, 2);
         check(backend.received.pubkey.length() == 0 && backend.received.compressmode == Xlog.ZLIB_MODE
-                && backend.received.cachedays == 2, "Original Kotlin overload/defaults changed");
+                && backend.received.cachedays == 2 && backend.received.maxFileSizeBytes == 0
+                && backend.received.maxAliveTimeSeconds == 864000, "Kotlin defaults changed");
         System.out.println("PASS: actual compiled Kotlin factory, all fields, target, errors and old overload");
     }
 
@@ -114,7 +117,12 @@ public final class ConfiguredInstanceTest {
         CaptureXlog backend = new CaptureXlog();
         Log.setLogImp(backend);
         Xlog.XLogConfig networkConfig = config("network");
+        networkConfig.maxFileSizeBytes = (1L << 33) + 123;
+        networkConfig.maxAliveTimeSeconds = (1L << 32) + 456;
         Log.LogInstance network = Log.openLogInstance(networkConfig);
+        check(backend.received.maxFileSizeBytes == (1L << 33) + 123
+                && backend.received.maxAliveTimeSeconds == (1L << 32) + 456,
+                "File policy fields were narrowed or dropped");
         check(backend.received == networkConfig, "Xlog must pass the complete config to JNI");
         check(PUBLIC_KEY.equals(backend.received.pubkey), "Encryption key must not be discarded");
         check(backend.received.compressmode == Xlog.ZSTD_MODE
@@ -138,9 +146,8 @@ public final class ConfiguredInstanceTest {
                 && backend.received.compressmode == Xlog.ZLIB_MODE, "Instance settings/routing mixed");
 
         int before = backend.opens;
-        rejects(IllegalStateException.class, config("network"));
-        rejects(IllegalStateException.class, config("native_owned"));
-        check(backend.opens == before, "Occupied prefixes must not ignore new settings");
+        check(Log.openLogInstance(config("network")) == network, "Existing instance must be reused");
+        check(backend.opens == before, "Reusing a prefix must not enter the creation backend");
 
         backend.fail = true;
         rejects(IllegalStateException.class, config("failed"));
@@ -168,6 +175,12 @@ public final class ConfiguredInstanceTest {
         invalid.level = Xlog.LEVEL_NONE + 1;
         rejects(IllegalArgumentException.class, invalid);
         invalid.level = -1;
+        rejects(IllegalArgumentException.class, invalid);
+        invalid = config("invalid_size");
+        invalid.maxFileSizeBytes = -1;
+        rejects(IllegalArgumentException.class, invalid);
+        invalid = config("invalid_retention");
+        invalid.maxAliveTimeSeconds = 86399;
         rejects(IllegalArgumentException.class, invalid);
         check(backend.opens == before, "Invalid configuration reached the backend");
 

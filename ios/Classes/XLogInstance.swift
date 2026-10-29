@@ -76,14 +76,6 @@ import mars
     native.setConsoleLogEnabled(enabled)
   }
 
-  public func setMaxFileSize(_ maxBytes: Int64) {
-    native.setMaxFileSize(maxBytes)
-  }
-
-  public func setMaxAliveTime(_ seconds: TimeInterval) {
-    native.setMaxAliveTime(seconds)
-  }
-
   public func logFiles(timeSpanDays: Int) -> [String] {
     native.files(fromTimeSpan: timeSpanDays)
   }

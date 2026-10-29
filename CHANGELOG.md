@@ -1,3 +1,10 @@
+## 0.3.0
+
+* Upgrade native xlog to 1.4.0; replace file size and retention setters with creation configuration.
+* Unify named-instance reuse and fix Android Release JNI shrinking.
+* Add default/named-instance examples and write benchmarks.
+* Update tests and simplify the English/Chinese guides.
+
 ## 0.2.0
 
 * Upgrade Android and iOS native dependencies to 1.3.7.

@@ -120,6 +120,10 @@ struct XlogConfig {
   var cacheDays: Int64
   /// Whether logs are also mirrored to the system console (logcat / Xcode).
   var consoleLogEnabled: Bool
+  /// Creation-only file splitting threshold in bytes; 0 disables size splitting.
+  var maxFileSizeBytes: Int64
+  /// Creation-only expiry threshold in seconds; minimum one day, default ten.
+  var maxAliveTimeSeconds: Int64
 
 
   // swift-format-ignore: AlwaysUseLowerCamelCase
@@ -134,6 +138,8 @@ struct XlogConfig {
     let compressLevel = pigeonVar_list[7] as! Int64
     let cacheDays = pigeonVar_list[8] as! Int64
     let consoleLogEnabled = pigeonVar_list[9] as! Bool
+    let maxFileSizeBytes = pigeonVar_list[10] as! Int64
+    let maxAliveTimeSeconds = pigeonVar_list[11] as! Int64
 
     return XlogConfig(
       cacheDir: cacheDir,
@@ -145,7 +151,9 @@ struct XlogConfig {
       compressMode: compressMode,
       compressLevel: compressLevel,
       cacheDays: cacheDays,
-      consoleLogEnabled: consoleLogEnabled
+      consoleLogEnabled: consoleLogEnabled,
+      maxFileSizeBytes: maxFileSizeBytes,
+      maxAliveTimeSeconds: maxAliveTimeSeconds
     )
   }
   func toList() -> [Any?] {
@@ -160,6 +168,8 @@ struct XlogConfig {
       compressLevel,
       cacheDays,
       consoleLogEnabled,
+      maxFileSizeBytes,
+      maxAliveTimeSeconds,
     ]
   }
 }
@@ -253,12 +263,6 @@ protocol XlogConfigApi {
   /// Switches the appender write mode at runtime. Must be called after
   /// [initialize].
   func setAppenderMode(mode: XlogMode) throws
-  /// Sets the maximum size in bytes of a single log file; the appender rolls
-  /// to a new file once exceeded. Must be called after [initialize].
-  func setMaxFileSize(maxBytes: Int64) throws
-  /// Sets the maximum retention time in seconds for log files; older files are
-  /// deleted automatically. Must be called after [initialize].
-  func setMaxAliveSeconds(seconds: Int64) throws
   /// Returns the prefixes of all currently open log instances.
   func instancePrefixes() throws -> [String]
   /// Whether a log instance with [prefix] is currently open.
@@ -392,40 +396,6 @@ class XlogConfigApiSetup {
       }
     } else {
       setAppenderModeChannel.setMessageHandler(nil)
-    }
-    /// Sets the maximum size in bytes of a single log file; the appender rolls
-    /// to a new file once exceeded. Must be called after [initialize].
-    let setMaxFileSizeChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.xlog.XlogConfigApi.setMaxFileSize\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
-    if let api = api {
-      setMaxFileSizeChannel.setMessageHandler { message, reply in
-        let args = message as! [Any?]
-        let maxBytesArg = args[0] as! Int64
-        do {
-          try api.setMaxFileSize(maxBytes: maxBytesArg)
-          reply(wrapResult(nil))
-        } catch {
-          reply(wrapError(error))
-        }
-      }
-    } else {
-      setMaxFileSizeChannel.setMessageHandler(nil)
-    }
-    /// Sets the maximum retention time in seconds for log files; older files are
-    /// deleted automatically. Must be called after [initialize].
-    let setMaxAliveSecondsChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.xlog.XlogConfigApi.setMaxAliveSeconds\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
-    if let api = api {
-      setMaxAliveSecondsChannel.setMessageHandler { message, reply in
-        let args = message as! [Any?]
-        let secondsArg = args[0] as! Int64
-        do {
-          try api.setMaxAliveSeconds(seconds: secondsArg)
-          reply(wrapResult(nil))
-        } catch {
-          reply(wrapError(error))
-        }
-      }
-    } else {
-      setMaxAliveSecondsChannel.setMessageHandler(nil)
     }
     /// Returns the prefixes of all currently open log instances.
     let instancePrefixesChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.xlog.XlogConfigApi.instancePrefixes\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)

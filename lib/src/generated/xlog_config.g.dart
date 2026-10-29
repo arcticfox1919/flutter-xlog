@@ -58,6 +58,8 @@ class XlogConfig {
     this.compressLevel = 6,
     this.cacheDays = 0,
     this.consoleLogEnabled = true,
+    this.maxFileSizeBytes = 0,
+    this.maxAliveTimeSeconds = 10 * 24 * 60 * 60,
   });
 
   /// Memory-mapped cache directory (e.g. context.cacheDir on Android).
@@ -92,6 +94,12 @@ class XlogConfig {
   /// Whether logs are also mirrored to the system console (logcat / Xcode).
   bool consoleLogEnabled;
 
+  /// Creation-only file splitting threshold in bytes; 0 disables size splitting.
+  int maxFileSizeBytes;
+
+  /// Creation-only expiry threshold in seconds; minimum one day, default ten.
+  int maxAliveTimeSeconds;
+
   Object encode() {
     return <Object?>[
       cacheDir,
@@ -104,6 +112,8 @@ class XlogConfig {
       compressLevel,
       cacheDays,
       consoleLogEnabled,
+      maxFileSizeBytes,
+      maxAliveTimeSeconds,
     ];
   }
 
@@ -120,6 +130,8 @@ class XlogConfig {
       compressLevel: result[7]! as int,
       cacheDays: result[8]! as int,
       consoleLogEnabled: result[9]! as bool,
+      maxFileSizeBytes: result[10]! as int,
+      maxAliveTimeSeconds: result[11]! as int,
     );
   }
 }
@@ -344,54 +356,6 @@ class XlogConfigApi {
     );
     final List<Object?>? pigeonVar_replyList =
         await pigeonVar_channel.send(<Object?>[mode]) as List<Object?>?;
-    if (pigeonVar_replyList == null) {
-      throw _createConnectionError(pigeonVar_channelName);
-    } else if (pigeonVar_replyList.length > 1) {
-      throw PlatformException(
-        code: pigeonVar_replyList[0]! as String,
-        message: pigeonVar_replyList[1] as String?,
-        details: pigeonVar_replyList[2],
-      );
-    } else {
-      return;
-    }
-  }
-
-  /// Sets the maximum size in bytes of a single log file; the appender rolls
-  /// to a new file once exceeded. Must be called after [initialize].
-  Future<void> setMaxFileSize(int maxBytes) async {
-    final String pigeonVar_channelName = 'dev.flutter.pigeon.xlog.XlogConfigApi.setMaxFileSize$pigeonVar_messageChannelSuffix';
-    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
-      pigeonVar_channelName,
-      pigeonChannelCodec,
-      binaryMessenger: pigeonVar_binaryMessenger,
-    );
-    final List<Object?>? pigeonVar_replyList =
-        await pigeonVar_channel.send(<Object?>[maxBytes]) as List<Object?>?;
-    if (pigeonVar_replyList == null) {
-      throw _createConnectionError(pigeonVar_channelName);
-    } else if (pigeonVar_replyList.length > 1) {
-      throw PlatformException(
-        code: pigeonVar_replyList[0]! as String,
-        message: pigeonVar_replyList[1] as String?,
-        details: pigeonVar_replyList[2],
-      );
-    } else {
-      return;
-    }
-  }
-
-  /// Sets the maximum retention time in seconds for log files; older files are
-  /// deleted automatically. Must be called after [initialize].
-  Future<void> setMaxAliveSeconds(int seconds) async {
-    final String pigeonVar_channelName = 'dev.flutter.pigeon.xlog.XlogConfigApi.setMaxAliveSeconds$pigeonVar_messageChannelSuffix';
-    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
-      pigeonVar_channelName,
-      pigeonChannelCodec,
-      binaryMessenger: pigeonVar_binaryMessenger,
-    );
-    final List<Object?>? pigeonVar_replyList =
-        await pigeonVar_channel.send(<Object?>[seconds]) as List<Object?>?;
     if (pigeonVar_replyList == null) {
       throw _createConnectionError(pigeonVar_channelName);
     } else if (pigeonVar_replyList.length > 1) {

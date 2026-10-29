@@ -18,7 +18,7 @@ final class XLogNative {
               'xlogger_writer_release'),
         );
 
-  /// Requires the per-entry tag writer API from native 1.3.7.
+  /// Requires native 1.4.0, including the per-entry tag writer C API.
   /// Resolve once and retain the library, bindings and finalizer together.
   static final XLogNative instance = XLogNative(_open());
 

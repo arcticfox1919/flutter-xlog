@@ -123,7 +123,11 @@ data class XlogConfig (
   /** Number of days to keep cached (mmap) logs. 0 uses the native default. */
   val cacheDays: Long,
   /** Whether logs are also mirrored to the system console (logcat / Xcode). */
-  val consoleLogEnabled: Boolean
+  val consoleLogEnabled: Boolean,
+  /** Creation-only file splitting threshold in bytes; 0 disables size splitting. */
+  val maxFileSizeBytes: Long,
+  /** Creation-only expiry threshold in seconds; minimum one day, default ten. */
+  val maxAliveTimeSeconds: Long
 )
  {
   companion object {
@@ -138,7 +142,9 @@ data class XlogConfig (
       val compressLevel = pigeonVar_list[7] as Long
       val cacheDays = pigeonVar_list[8] as Long
       val consoleLogEnabled = pigeonVar_list[9] as Boolean
-      return XlogConfig(cacheDir, logDir, namePrefix, level, mode, pubKey, compressMode, compressLevel, cacheDays, consoleLogEnabled)
+      val maxFileSizeBytes = pigeonVar_list[10] as Long
+      val maxAliveTimeSeconds = pigeonVar_list[11] as Long
+      return XlogConfig(cacheDir, logDir, namePrefix, level, mode, pubKey, compressMode, compressLevel, cacheDays, consoleLogEnabled, maxFileSizeBytes, maxAliveTimeSeconds)
     }
   }
   fun toList(): List<Any?> {
@@ -153,6 +159,8 @@ data class XlogConfig (
       compressLevel,
       cacheDays,
       consoleLogEnabled,
+      maxFileSizeBytes,
+      maxAliveTimeSeconds,
     )
   }
 }
@@ -237,16 +245,6 @@ interface XlogConfigApi {
    * [initialize].
    */
   fun setAppenderMode(mode: XlogMode)
-  /**
-   * Sets the maximum size in bytes of a single log file; the appender rolls
-   * to a new file once exceeded. Must be called after [initialize].
-   */
-  fun setMaxFileSize(maxBytes: Long)
-  /**
-   * Sets the maximum retention time in seconds for log files; older files are
-   * deleted automatically. Must be called after [initialize].
-   */
-  fun setMaxAliveSeconds(seconds: Long)
   /** Returns the prefixes of all currently open log instances. */
   fun instancePrefixes(): List<String>
   /** Whether a log instance with [prefix] is currently open. */
@@ -388,42 +386,6 @@ interface XlogConfigApi {
             val modeArg = args[0] as XlogMode
             val wrapped: List<Any?> = try {
               api.setAppenderMode(modeArg)
-              listOf(null)
-            } catch (exception: Throwable) {
-              wrapError(exception)
-            }
-            reply.reply(wrapped)
-          }
-        } else {
-          channel.setMessageHandler(null)
-        }
-      }
-      run {
-        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.xlog.XlogConfigApi.setMaxFileSize$separatedMessageChannelSuffix", codec)
-        if (api != null) {
-          channel.setMessageHandler { message, reply ->
-            val args = message as List<Any?>
-            val maxBytesArg = args[0] as Long
-            val wrapped: List<Any?> = try {
-              api.setMaxFileSize(maxBytesArg)
-              listOf(null)
-            } catch (exception: Throwable) {
-              wrapError(exception)
-            }
-            reply.reply(wrapped)
-          }
-        } else {
-          channel.setMessageHandler(null)
-        }
-      }
-      run {
-        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.xlog.XlogConfigApi.setMaxAliveSeconds$separatedMessageChannelSuffix", codec)
-        if (api != null) {
-          channel.setMessageHandler { message, reply ->
-            val args = message as List<Any?>
-            val secondsArg = args[0] as Long
-            val wrapped: List<Any?> = try {
-              api.setMaxAliveSeconds(secondsArg)
               listOf(null)
             } catch (exception: Throwable) {
               wrapError(exception)

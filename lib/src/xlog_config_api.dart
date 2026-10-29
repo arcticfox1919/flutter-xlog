@@ -48,6 +48,10 @@ class XLogManager {
   /// - [cacheDays]: days to keep cached (mmap) logs; 0 uses the native default.
   /// - [consoleLogEnabled]: also mirror logs to the system console
   ///   (logcat / Xcode).
+  /// - [maxFileSizeBytes]: creation-only size splitting threshold; 0 disables it.
+  /// - [maxAliveTimeSeconds]: creation-only expiry threshold; at least one day.
+  /// Each instance must use dedicated log/cache directories; cleanup scans the
+  /// whole directory. Size is a soft threshold; cleanup runs after a delay.
   static Future<void> initialize({
     required String cacheDir,
     required String logDir,
@@ -59,7 +63,17 @@ class XLogManager {
     int compressLevel = 6,
     int cacheDays = 0,
     bool consoleLogEnabled = true,
+    int maxFileSizeBytes = 0,
+    int maxAliveTimeSeconds = 10 * 24 * 60 * 60,
   }) {
+    RangeError.checkNotNegative(maxFileSizeBytes, 'maxFileSizeBytes');
+    if (maxAliveTimeSeconds < 24 * 60 * 60) {
+      throw RangeError.value(
+        maxAliveTimeSeconds,
+        'maxAliveTimeSeconds',
+        'Must be at least 86400 seconds',
+      );
+    }
     return _api.initialize(
       pigeon.XlogConfig(
         cacheDir: cacheDir,
@@ -76,6 +90,8 @@ class XLogManager {
         compressLevel: compressLevel,
         cacheDays: cacheDays,
         consoleLogEnabled: consoleLogEnabled,
+        maxFileSizeBytes: maxFileSizeBytes,
+        maxAliveTimeSeconds: maxAliveTimeSeconds,
       ),
     );
   }
@@ -104,16 +120,6 @@ class XLogManager {
   static Future<void> setAppenderMode(XLogMode mode) => _api.setAppenderMode(
         mode == XLogMode.sync ? pigeon.XlogMode.sync : pigeon.XlogMode.async,
       );
-
-  /// Sets the maximum size in bytes of a single log file; the appender rolls
-  /// to a new file once exceeded. Must be called after [initialize].
-  static Future<void> setMaxFileSize(int maxBytes) =>
-      _api.setMaxFileSize(maxBytes);
-
-  /// Sets the maximum retention time in seconds for log files; older files are
-  /// deleted automatically. Must be called after [initialize].
-  static Future<void> setMaxAliveSeconds(int seconds) =>
-      _api.setMaxAliveSeconds(seconds);
 
   static pigeon.XlogLevel _toPigeonLevel(XLogLevel level) {
     return switch (level) {

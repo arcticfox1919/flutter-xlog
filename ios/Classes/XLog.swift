@@ -13,6 +13,10 @@ import mars
   public var compressMode: XLogCompressMode = .zlib
   public var compressLevel = 6
   public var consoleLogEnabled = true
+  /// Creation-only soft splitting threshold in bytes; 0 disables size splitting.
+  public var maxFileSizeBytes: Int64 = 0
+  /// Creation-only expiry threshold in seconds; minimum one day, default ten.
+  public var maxAliveTimeSeconds: Int64 = 10 * 24 * 60 * 60
 
   public init(logDirectory: String, namePrefix: String) {
     self.logDirectory = logDirectory
@@ -30,6 +34,8 @@ import mars
     copy.compressMode = compressMode
     copy.compressLevel = compressLevel
     copy.consoleLogEnabled = consoleLogEnabled
+    copy.maxFileSizeBytes = maxFileSizeBytes
+    copy.maxAliveTimeSeconds = maxAliveTimeSeconds
     return copy
   }
 
@@ -45,6 +51,8 @@ import mars
     configuration.mode = mode.native
     configuration.compressMode = compressMode.native
     configuration.compressLevel = compressLevel
+    configuration.maxFileSizeBytes = maxFileSizeBytes
+    configuration.maxAliveTimeSeconds = maxAliveTimeSeconds
     return configuration
   }
 }
@@ -52,6 +60,7 @@ import mars
 /// Native iOS facade over mars-xlog, shared with the Flutter implementation.
 @objcMembers public final class XLog: NSObject {
   private override init() {}
+  private static let instanceCreationLock = NSRecursiveLock()
 
   @discardableResult
   public static func initialize(configuration: XLogConfiguration) -> Bool {
@@ -85,14 +94,6 @@ import mars
 
   public static func setAppenderMode(_ mode: XLogMode) {
     MarsXLog.setMode(mode.native)
-  }
-
-  public static func setMaxFileSize(_ maxBytes: Int64) {
-    MarsXLog.setMaxFileSize(maxBytes)
-  }
-
-  public static func setMaxAliveTime(_ seconds: TimeInterval) {
-    MarsXLog.setMaxAliveTime(seconds)
   }
 
   public static func log(
@@ -142,6 +143,12 @@ import mars
   }
 
   public static func openInstance(configuration: XLogConfiguration) -> XLogInstance? {
+    instanceCreationLock.lock()
+    defer { instanceCreationLock.unlock() }
+    // Reuse the native instance without applying the new configuration.
+    if let existing = instance(namePrefix: configuration.namePrefix) {
+      return existing
+    }
     guard let instance = MarsXLog.openInstance(with: configuration.native) else {
       return nil
     }

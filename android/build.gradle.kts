@@ -31,9 +31,10 @@ android {
 
     defaultConfig {
         minSdk = 24
+        consumerProguardFiles("consumer-rules.pro")
     }
 }
 
 dependencies {
-    implementation("com.github.arcticfox1919:xlog:1.3.7")
+    implementation("com.github.arcticfox1919:xlog:1.4.0")
 }

@@ -18,19 +18,27 @@ import xlog
       logDirectory: logDirectory.path,
       namePrefix: "xlog_example"
     )
-    configuration.cacheDirectory = cacheDirectory.path
-    configuration.level = .debug
-    configuration.consoleLogEnabled = true
+    configuration.cacheDirectory = cacheDirectory.appendingPathComponent("xlog-example").path
+    configuration.level = .info
+    configuration.mode = .async
+    configuration.consoleLogEnabled = false
+    configuration.maxFileSizeBytes = 8 * 1024 * 1024
+    configuration.maxAliveTimeSeconds = 7 * 24 * 60 * 60
     XLog.initialize(configuration: configuration)
     XLog.info("AppDelegate", message: "XLog initialized at \(logDirectory.path)")
 
     let otherConfiguration = XLogConfiguration(
-      logDirectory: logDirectory.path,
+      // Each appender needs its own log/cache directories, even when their
+      // prefixes differ. Directory-wide cleanup must not touch another owner.
+      logDirectory: logDirectory.deletingLastPathComponent().appendingPathComponent("xlog-other").path,
       namePrefix: "xlog_other"
     )
-    otherConfiguration.cacheDirectory = cacheDirectory.path
-    otherConfiguration.level = .debug
-    otherConfiguration.consoleLogEnabled = true
+    otherConfiguration.cacheDirectory = cacheDirectory.appendingPathComponent("xlog-other").path
+    otherConfiguration.level = .info
+    otherConfiguration.mode = .async
+    otherConfiguration.consoleLogEnabled = false
+    otherConfiguration.maxFileSizeBytes = 8 * 1024 * 1024
+    otherConfiguration.maxAliveTimeSeconds = 7 * 24 * 60 * 60
     guard let other = XLog.openInstance(configuration: otherConfiguration) else {
       fatalError("Cannot initialize xlog_other")
     }

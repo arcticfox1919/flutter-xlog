@@ -15,6 +15,8 @@ class XlogConfigApiImpl: XlogConfigApi {
     configuration.compressMode = config.compressMode.xlogCompressMode
     configuration.compressLevel = Int(config.compressLevel)
     configuration.consoleLogEnabled = config.consoleLogEnabled
+    configuration.maxFileSizeBytes = config.maxFileSizeBytes
+    configuration.maxAliveTimeSeconds = config.maxAliveTimeSeconds
 
     guard XLog.initialize(configuration: configuration) else {
       throw PigeonError(
@@ -47,14 +49,6 @@ class XlogConfigApiImpl: XlogConfigApi {
 
   func setAppenderMode(mode: XlogMode) throws {
     XLog.setAppenderMode(mode.xlogMode)
-  }
-
-  func setMaxFileSize(maxBytes: Int64) throws {
-    XLog.setMaxFileSize(maxBytes)
-  }
-
-  func setMaxAliveSeconds(seconds: Int64) throws {
-    XLog.setMaxAliveTime(TimeInterval(seconds))
   }
 
   func instancePrefixes() throws -> [String] {
